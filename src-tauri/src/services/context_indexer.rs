@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use crate::domain::{Message, MessageRole};
 use crate::services::tree_sitter::TreeSitterService;
 
 pub struct ContextIndexer {
@@ -7,7 +6,7 @@ pub struct ContextIndexer {
     index: parking_lot::RwLock<std::collections::HashMap<String, CodeContext>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct CodeContext {
     functions: Vec<FunctionInfo>,
     structures: Vec<StructureInfo>,
@@ -49,8 +48,7 @@ impl ContextIndexer {
             let ext = file_path.split('.').last().unwrap_or("");
             let language = ext.to_lowercase();
 
-            if let Ok(result) = self.tree_sitter.parse_content(&content, &language) {
-                if let Some(tree) = result.tree {
+            if self.tree_sitter.parse_content(&content, &language).is_ok() {
                     if let Ok(functions) = self.tree_sitter.query_functions(&content, &language) {
                         for func in functions {
                             code_context.functions.push(FunctionInfo {
@@ -61,7 +59,6 @@ impl ContextIndexer {
                             });
                         }
                     }
-                }
             }
         }
 
@@ -93,7 +90,7 @@ impl ContextIndexer {
 impl Default for ContextIndexer {
     fn default() -> Self {
         Self {
-            tree_sitter: Arc::new(TreeSitterService::new()),
+            tree_sitter: TreeSitterService::new(),
             index: parking_lot::RwLock::new(std::collections::HashMap::new()),
         }
     }

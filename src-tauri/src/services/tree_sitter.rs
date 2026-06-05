@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
-use tree_sitter::{Language, Parser, Tree};
-use tree_sitter_cli::LANGUAGE;
+use tree_sitter::{Language, Parser};
 use serde::{Deserialize, Serialize};
 use parking_lot::RwLock;
 
@@ -64,24 +63,21 @@ impl TreeSitterService {
     pub fn get_language(lang: &str) -> Option<Language> {
         match lang.to_lowercase().as_str() {
             "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
-            "typescript" | "tsx" => Some(tree_sitter_typescript::LANGUAGE.into()),
+            "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+            "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
             "javascript" | "jsx" | "mjs" => Some(tree_sitter_javascript::LANGUAGE.into()),
             "python" => Some(tree_sitter_python::LANGUAGE.into()),
             "go" => Some(tree_sitter_go::LANGUAGE.into()),
-            "c" | "cpp" => Some(tree_sitter_c::LANGUAGE.into()),
-            "java" => Some(tree_sitter_java::LANGUAGE.into()),
-            "ruby" => Some(tree_sitter_ruby::LANGUAGE.into()),
-            "php" => Some(tree_sitter_php::LANGUAGE.into()),
-            "html" => Some(tree_sitter_html::LANGUAGE.into()),
-            "css" => Some(tree_sitter_css::LANGUAGE.into()),
             "json" => Some(tree_sitter_json::LANGUAGE.into()),
-            "toml" => Some(tree_sitter_toml::LANGUAGE.into()),
             _ => None,
         }
     }
 
     pub fn parse_file(&self, path: &Path, content: &str) -> Result<ParseResult, String> {
-        let ext = path.extension()?.to_str().unwrap_or("");
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .ok_or_else(|| format!("Could not infer language for {}", path.display()))?;
         let lang_name = self.extension_to_language(ext);
 
         let language = Self::get_language(&lang_name).ok_or_else(|| {
@@ -105,7 +101,7 @@ impl TreeSitterService {
         let syntax_tree = self.node_to_syntax_node(&root_node, content);
 
         Ok(ParseResult {
-            tree: Some(syntax_tree.to_string()),
+            tree: Some(serde_json::to_string(&syntax_tree).map_err(|e| e.to_string())?),
             root_node: Some(root_node.kind().to_string()),
             language: Some(lang_name),
             error: None,
@@ -128,7 +124,7 @@ impl TreeSitterService {
         let syntax_tree = self.node_to_syntax_node(&root_node, content);
 
         Ok(ParseResult {
-            tree: Some(syntax_tree.to_string()),
+            tree: Some(serde_json::to_string(&syntax_tree).map_err(|e| e.to_string())?),
             root_node: Some(root_node.kind().to_string()),
             language: Some(language.to_string()),
             error: None,

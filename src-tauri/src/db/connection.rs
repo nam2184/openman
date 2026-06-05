@@ -25,10 +25,25 @@ impl Database {
             CREATE TABLE IF NOT EXISTS agent_sessions (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
+                directory TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS session_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS session_group_sessions (
+                group_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                PRIMARY KEY (group_id, session_id),
+                FOREIGN KEY (group_id) REFERENCES session_groups(id),
+                FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -49,10 +64,16 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_project ON agent_sessions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_session_groups_session ON session_group_sessions(session_id);
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project_id);
             "
-        ).map_err(|e| e.to_string())
+        ).map_err(|e| e.to_string())?;
+
+        let _ = self.conn.execute("ALTER TABLE session_groups ADD COLUMN name TEXT", []);
+        let _ = self.conn.execute("ALTER TABLE agent_sessions ADD COLUMN directory TEXT NOT NULL DEFAULT ''", []);
+
+        Ok(())
     }
 
     pub fn connection(&self) -> &Connection {

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use notify::{Watcher, RecommendedWatcher, RecursiveMode, Event};
+use notify::{Watcher, RecursiveMode, Event};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
@@ -40,6 +40,7 @@ impl WatcherService {
             }
         });
 
+        let callback_project_id = project_id.clone();
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             if let Ok(event) = res {
                 let kind = match event.kind {
@@ -50,8 +51,8 @@ impl WatcherService {
                 };
 
                 for path in event.paths {
-                    let file_event = FileEvent {
-                        project_id: project_id.clone(),
+                    let _file_event = FileEvent {
+                        project_id: callback_project_id.clone(),
                         path: path.to_string_lossy().to_string(),
                         kind: kind.clone(),
                     };

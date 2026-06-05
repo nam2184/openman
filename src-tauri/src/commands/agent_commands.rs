@@ -1,7 +1,5 @@
 use tauri::State;
-use crate::domain::{AgentSession, Message, MessageRole};
 use crate::services::agent_runtime::AgentRuntime;
-use crate::services::memory_service::MemoryService;
 use std::sync::Arc;
 
 #[tauri::command]

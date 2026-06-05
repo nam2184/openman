@@ -3,6 +3,54 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub tech_stack: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl Project {
+    pub fn new(path: String, name: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            path,
+            name,
+            tech_stack: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+
+    pub fn container(name: String) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            path: String::new(),
+            name,
+            tech_stack: Vec::new(),
+            created_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TechStack {
+    pub languages: Vec<String>,
+}
+
+impl TechStack {
+    pub fn new() -> Self {
+        Self { languages: Vec::new() }
+    }
+
+    pub fn add_language(&mut self, language: String) {
+        if !self.languages.contains(&language) {
+            self.languages.push(language);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Agent {
     pub id: String,
     pub project_id: String,
@@ -64,18 +112,41 @@ pub struct AgentMemory {
 pub struct AgentSession {
     pub id: String,
     pub project_id: String,
+    pub directory: String,
     pub provider: String,
     pub model: String,
+    pub group_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
 impl AgentSession {
-    pub fn new(project_id: String, provider: String, model: String) -> Self {
+    pub fn new(project_id: String, directory: String, provider: String, model: String) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             project_id,
+            directory,
             provider,
             model,
+            group_id: None,
+            created_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionGroup {
+    pub id: String,
+    pub name: Option<String>,
+    pub session_ids: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl SessionGroup {
+    pub fn new(session_ids: Vec<String>) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            name: None,
+            session_ids,
             created_at: Utc::now(),
         }
     }
@@ -125,6 +196,26 @@ impl Provider {
             model,
             api_key: None,
             base_url: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ProviderType {
+    Anthropic,
+    OpenAI,
+    OpenRouter,
+    Ollama,
+}
+
+impl ProviderType {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.to_lowercase().as_str() {
+            "anthropic" => Some(Self::Anthropic),
+            "openai" => Some(Self::OpenAI),
+            "openrouter" => Some(Self::OpenRouter),
+            "ollama" => Some(Self::Ollama),
+            _ => None,
         }
     }
 }

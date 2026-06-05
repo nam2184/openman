@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use parking_lot::RwLock;
-use crate::domain::Provider;
+use openman_agents::Provider;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

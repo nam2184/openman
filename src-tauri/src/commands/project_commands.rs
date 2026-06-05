@@ -1,9 +1,16 @@
 use std::path::Path;
 use tauri::State;
-use crate::domain::Project;
+use openman_agents::Project;
 use crate::services::project_service::ProjectService;
-use crate::services::stack_detector::StackDetector;
 use std::sync::Arc;
+
+#[tauri::command]
+pub async fn create_project(
+    name: String,
+    project_service: State<'_, Arc<ProjectService>>,
+) -> Result<Project, String> {
+    project_service.create_project(name)
+}
 
 #[tauri::command]
 pub async fn open_project(
