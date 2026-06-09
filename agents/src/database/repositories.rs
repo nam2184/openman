@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 
 use crate::database::connection::Database;
-use crate::{AgentSession, Message, MessageRole, Project, ProviderConfig, SessionGroup};
+use crate::{AgentSession, Message, MessageRole, Project, ProviderConfig, ProviderProtocol, SessionGroup};
 
 pub struct ProjectRepository;
 
@@ -403,12 +403,13 @@ impl ProviderConfigRepository {
     pub fn upsert(db: &Database, config: &ProviderConfig) -> Result<(), String> {
         db.connection()
             .execute(
-                "INSERT OR REPLACE INTO provider_configs (name, model, api_key, base_url, enabled) VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT OR REPLACE INTO provider_configs (name, model, api_key, base_url, protocol, enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
                     config.name,
                     config.model,
                     config.api_key,
                     config.base_url,
+                    config.protocol.as_str(),
                     config.enabled as i32
                 ],
             )
@@ -419,7 +420,7 @@ impl ProviderConfigRepository {
     pub fn find_by_name(db: &Database, name: &str) -> Result<Option<ProviderConfig>, String> {
         let mut stmt = db
             .connection()
-            .prepare("SELECT name, model, api_key, base_url, enabled FROM provider_configs WHERE name = ?1")
+            .prepare("SELECT name, model, api_key, base_url, protocol, enabled FROM provider_configs WHERE name = ?1")
             .map_err(|e| e.to_string())?;
 
         let result = stmt
@@ -429,7 +430,8 @@ impl ProviderConfigRepository {
                     model: row.get(1)?,
                     api_key: row.get(2)?,
                     base_url: row.get(3)?,
-                    enabled: row.get::<_, i32>(4)? != 0,
+                    protocol: ProviderProtocol::from_name(row.get::<_, String>(4)?.as_str()),
+                    enabled: row.get::<_, i32>(5)? != 0,
                 })
             })
             .ok();
@@ -440,7 +442,7 @@ impl ProviderConfigRepository {
     pub fn list(db: &Database) -> Result<Vec<ProviderConfig>, String> {
         let mut stmt = db
             .connection()
-            .prepare("SELECT name, model, api_key, base_url, enabled FROM provider_configs")
+            .prepare("SELECT name, model, api_key, base_url, protocol, enabled FROM provider_configs")
             .map_err(|e| e.to_string())?;
 
         let configs = stmt
@@ -450,7 +452,8 @@ impl ProviderConfigRepository {
                     model: row.get(1)?,
                     api_key: row.get(2)?,
                     base_url: row.get(3)?,
-                    enabled: row.get::<_, i32>(4)? != 0,
+                    protocol: ProviderProtocol::from_name(row.get::<_, String>(4)?.as_str()),
+                    enabled: row.get::<_, i32>(5)? != 0,
                 })
             })
             .map_err(|e| e.to_string())?

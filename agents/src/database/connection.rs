@@ -68,6 +68,7 @@ impl Database {
                 model TEXT NOT NULL,
                 api_key TEXT,
                 base_url TEXT,
+                protocol TEXT NOT NULL DEFAULT 'openai',
                 enabled INTEGER NOT NULL DEFAULT 1
             );
 
@@ -91,6 +92,18 @@ impl Database {
         );
         let _ = self.conn.execute(
             "ALTER TABLE agent_sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022'",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE provider_configs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'openai'",
+            [],
+        );
+        let _ = self.conn.execute(
+            "UPDATE provider_configs SET protocol = 'anthropic' WHERE lower(name) = 'anthropic'",
+            [],
+        );
+        let _ = self.conn.execute(
+            "UPDATE provider_configs SET protocol = 'openai' WHERE lower(name) IN ('openai', 'minimax')",
             [],
         );
 

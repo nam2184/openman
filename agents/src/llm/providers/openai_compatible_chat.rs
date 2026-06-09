@@ -1,31 +1,37 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-
+`
 use super::{parse_openai_chunk, LlmError, LlmProvider, LlmStream, ToolResultInject};
 use crate::llm::events::LlmEvent;
-use crate::llm::request::{LlmMessage, LlmRequest};
+use crate::llm::request::{ContentPart, LlmRequest};
 
-pub struct MiniMaxProvider {
+pub struct OpenAiCompatibleChatProvider {
+    provider_name: String,
+    api_key_env: String,
     api_key: Option<String>,
-    group_id: Option<String>,
     base_url: String,
+    supported_models: Vec<String>,
     http_client: reqwest::Client,
 }
 
-impl MiniMaxProvider {
+impl OpenAiCompatibleChatProvider {
     pub fn new(
+        provider_name: &str,
         api_key: Option<String>,
-        group_id: Option<String>,
         base_url: Option<String>,
+        default_base_url: &str,
+        api_key_env: &str,
+        supported_models: &[&str],
     ) -> Self {
-        let base_url = base_url.unwrap_or_else(|| "https://api.minimax.chat".to_string());
         Self {
-            api_key: api_key.or_else(|| std::env::var("MINIMAX_API_KEY").ok()),
-            group_id: group_id.or_else(|| std::env::var("MINIMAX_GROUP_ID").ok()),
-            base_url,
+            provider_name: provider_name.to_string(),
+            api_key_env: api_key_env.to_string(),
+            api_key: api_key.or_else(|| std::env::var(api_key_env).ok()),
+            base_url: base_url.unwrap_or_else(|| default_base_url.to_string()),
+            supported_models: supported_models.iter().map(|model| model.to_string()).collect(),
             http_client: reqwest::Client::new(),
         }
     }
@@ -35,25 +41,49 @@ impl MiniMaxProvider {
         self
     }
 
-    pub fn with_group_id(mut self, group_id: &str) -> Self {
-        self.group_id = Some(group_id.to_string());
-        self
+    pub fn chat_completions_url(&self) -> String {
+        format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+    }
+
+    pub async fn endpoint_status(&self, model: &str) -> Result<reqwest::StatusCode, LlmError> {
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": "ping" }],
+            "stream": false,
+            "max_tokens": 1,
+        });
+
+        let mut request = self
+            .http_client
+            .post(self.chat_completions_url())
+            .timeout(Duration::from_secs(15))
+            .header("Content-Type", "application/json")
+            .json(&body);
+
+        if let Some(api_key) = self.api_key.as_deref() {
+            request = request.header("Authorization", format!("Bearer {api_key}"));
+        }
+
+        request
+            .send()
+            .await
+            .map(|response| response.status())
+            .map_err(|error| LlmError::from(error).provider(&self.provider_name).model(model))
+    }
+
+    fn auth_error(&self) -> LlmError {
+        LlmError::new("auth", &format!("{} not set", self.api_key_env)).provider(&self.provider_name)
     }
 }
 
 #[async_trait]
-impl LlmProvider for MiniMaxProvider {
+impl LlmProvider for OpenAiCompatibleChatProvider {
     fn provider_name(&self) -> &str {
-        "minimax"
+        &self.provider_name
     }
 
     fn supported_models(&self) -> Vec<String> {
-        vec![
-            "MiniMax-Text-01".to_string(),
-            "abab6-chat".to_string(),
-            "abab5.5-chat".to_string(),
-            "abab5.5s-chat".to_string(),
-        ]
+        self.supported_models.clone()
     }
 
     fn model_base_url(&self) -> Option<&str> {
@@ -65,106 +95,15 @@ impl LlmProvider for MiniMaxProvider {
     }
 
     async fn stream(&self, request: LlmRequest) -> Result<LlmStream, LlmError> {
-        let api_key = self
-            .api_key
-            .as_ref()
-            .ok_or_else(|| LlmError::new("auth", "MINIMAX_API_KEY not set").provider("minimax"))?;
-
-        let group_id = self
-            .group_id
-            .as_ref()
-            .ok_or_else(|| LlmError::new("auth", "MINIMAX_GROUP_ID not set").provider("minimax"))?;
-
-        let url = format!("{}/v1/chat/completions", self.base_url);
-
-        let messages = request
-            .messages
-            .iter()
-            .map(|msg| {
-                let role = match msg.role.as_str() {
-                    "user" => "user",
-                    "assistant" => "assistant",
-                    "system" => "system",
-                    "tool" => "tool",
-                    _ => "user",
-                };
-                let content = if msg.content.is_empty() {
-                    serde_json::Value::String("".to_string())
-                } else {
-                    let mut parts = Vec::new();
-                    for part in &msg.content {
-                        match part {
-                            crate::llm::request::ContentPart::Text { text } => {
-                                parts.push(serde_json::json!({
-                                    "type": "text",
-                                    "text": text
-                                }));
-                            }
-                            crate::llm::request::ContentPart::ToolCall { id, name, input } => {
-                                parts.push(serde_json::json!({
-                                    "type": "function",
-                                    "id": id,
-                                    "function": {
-                                        "name": name,
-                                        "arguments": serde_json::to_string(input).unwrap_or_default()
-                                    }
-                                }));
-                            }
-                            crate::llm::request::ContentPart::ToolResult { id, name, result } => {
-                                parts.push(serde_json::json!({
-                                    "type": "function",
-                                    "id": id,
-                                    "name": name,
-                                    "content": serde_json::to_string(result).unwrap_or_default()
-                                }));
-                            }
-                            crate::llm::request::ContentPart::Reasoning { .. } => {}
-                        }
-                    }
-                    if parts.len() == 1
-                        && parts[0].get("type").and_then(|t| t.as_str()) == Some("text")
-                    {
-                        serde_json::Value::String(
-                            parts[0]
-                                .get("text")
-                                .unwrap()
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string(),
-                        )
-                    } else {
-                        serde_json::Value::Array(parts)
-                    }
-                };
-                serde_json::json!({ "role": role, "content": content })
-            })
-            .collect::<Vec<_>>();
-
-        let tools = if request.tools.is_empty() {
-            serde_json::Value::Null
-        } else {
-            let tools = request
-                .tools
-                .iter()
-                .map(|t| {
-                    serde_json::json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }
-                    })
-                })
-                .collect::<Vec<_>>();
-            serde_json::Value::Array(tools)
-        };
+        let api_key = self.api_key.as_ref().ok_or_else(|| self.auth_error())?;
+        let messages = lower_messages(&request);
+        let tools = lower_tools(&request);
 
         let mut body = serde_json::json!({
             "model": request.model,
             "messages": messages,
             "stream": true,
-            "stream_precision": "0.001",
+            "stream_options": { "include_usage": true },
         });
 
         if let Some(temp) = request.temperature {
@@ -189,20 +128,19 @@ impl LlmProvider for MiniMaxProvider {
 
         let response = self
             .http_client
-            .post(&url)
+            .post(self.chat_completions_url())
             .header("Authorization", format!("Bearer {api_key}"))
             .header("Content-Type", "application/json")
-            .header("GroupId", group_id.as_str())
             .json(&body)
             .send()
             .await
-            .map_err(|e| LlmError::from(e).provider("minimax").model(&request.model))?;
+            .map_err(|error| LlmError::from(error).provider(&self.provider_name).model(&request.model))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             return Err(LlmError::new(&format!("http_{}", status.as_u16()), &text)
-                .provider("minimax")
+                .provider(&self.provider_name)
                 .model(&request.model));
         }
 
@@ -267,8 +205,7 @@ impl LlmProvider for MiniMaxProvider {
 
                         if in_tool_call && !tool_call_id.is_empty() {
                             in_tool_call = false;
-                            let input_str = tool_call_buffer.clone();
-                            let input: serde_json::Value = serde_json::from_str(&input_str)
+                            let input: serde_json::Value = serde_json::from_str(&tool_call_buffer)
                                 .unwrap_or(serde_json::Value::Object(Default::default()));
                             yield LlmEvent::ToolCall {
                                 id: tool_call_id.clone(),
@@ -306,28 +243,82 @@ impl LlmProvider for MiniMaxProvider {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn lower_messages(request: &LlmRequest) -> Vec<serde_json::Value> {
+    request
+        .messages
+        .iter()
+        .map(|msg| {
+            let role = match msg.role.as_str() {
+                "user" => "user",
+                "assistant" => "assistant",
+                "system" => "system",
+                "tool" => "tool",
+                _ => "user",
+            };
+            serde_json::json!({ "role": role, "content": lower_content(&msg.content) })
+        })
+        .collect()
+}
 
-    #[test]
-    fn provider_creation() {
-        let provider = MiniMaxProvider::new(
-            Some("test-key".to_string()),
-            Some("test-group".to_string()),
-            None,
+fn lower_content(content: &[ContentPart]) -> serde_json::Value {
+    if content.is_empty() {
+        return serde_json::Value::String(String::new());
+    }
+
+    let parts = content
+        .iter()
+        .filter_map(|part| match part {
+            ContentPart::Text { text } => Some(serde_json::json!({ "type": "text", "text": text })),
+            ContentPart::ToolCall { id, name, input } => Some(serde_json::json!({
+                "type": "function",
+                "id": id,
+                "function": {
+                    "name": name,
+                    "arguments": serde_json::to_string(input).unwrap_or_default()
+                }
+            })),
+            ContentPart::ToolResult { id, name, result } => Some(serde_json::json!({
+                "type": "function",
+                "id": id,
+                "name": name,
+                "content": serde_json::to_string(result).unwrap_or_default()
+            })),
+            ContentPart::Reasoning { .. } => None,
+        })
+        .collect::<Vec<_>>();
+
+    if parts.len() == 1 && parts[0].get("type").and_then(|value| value.as_str()) == Some("text") {
+        return serde_json::Value::String(
+            parts[0]
+                .get("text")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string(),
         );
-        assert_eq!(provider.provider_name(), "minimax");
-        assert!(provider.api_key().is_some());
     }
 
-    #[test]
-    fn provider_from_env() {
-        std::env::set_var("MINIMAX_API_KEY", "env-key");
-        std::env::set_var("MINIMAX_GROUP_ID", "env-group");
-        let provider = MiniMaxProvider::new(None, None, None);
-        assert_eq!(provider.api_key(), Some("env-key"));
-        std::env::remove_var("MINIMAX_API_KEY");
-        std::env::remove_var("MINIMAX_GROUP_ID");
+    serde_json::Value::Array(parts)
+}
+
+fn lower_tools(request: &LlmRequest) -> serde_json::Value {
+    if request.tools.is_empty() {
+        return serde_json::Value::Null;
     }
+
+    serde_json::Value::Array(
+        request
+            .tools
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters
+                    }
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
 }

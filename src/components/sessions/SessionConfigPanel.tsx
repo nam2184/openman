@@ -16,6 +16,7 @@ interface ProviderDraft {
   model: string;
   api_key: string;
   base_url: string;
+  protocol: "openai" | "anthropic";
   enabled: boolean;
 }
 
@@ -24,6 +25,7 @@ const emptyProviderDraft: ProviderDraft = {
   model: "",
   api_key: "",
   base_url: "",
+  protocol: "openai",
   enabled: true,
 };
 
@@ -84,6 +86,7 @@ export function SessionConfigPanel({ onClose }: SessionConfigPanelProps) {
         model: providerDraft.model.trim(),
         api_key: providerDraft.api_key.trim() || null,
         base_url: providerDraft.base_url.trim() || null,
+        protocol: providerDraft.protocol,
         enabled: providerDraft.enabled,
       };
 
@@ -192,10 +195,22 @@ export function SessionConfigPanel({ onClose }: SessionConfigPanelProps) {
                   ...draft,
                   name,
                   model: draft.model || getDefaultModel(name),
+                  protocol: inferProtocol(name),
                 }));
               }}
               placeholder="anthropic"
             />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-[#d4d4d4]">Protocol</span>
+            <select
+              value={providerDraft.protocol}
+              onChange={(event) => setProviderDraft((draft) => ({ ...draft, protocol: event.target.value as ProviderDraft["protocol"] }))}
+              className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white"
+            >
+              <option value="openai">OpenAI-compatible chat</option>
+              <option value="anthropic">Anthropic messages</option>
+            </select>
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium text-[#d4d4d4]">Default Model</span>
@@ -260,8 +275,13 @@ function providerToDraft(provider: ProviderConfig): ProviderDraft {
     model: provider.model,
     api_key: provider.api_key ?? "",
     base_url: provider.base_url ?? "",
+    protocol: provider.protocol ?? inferProtocol(provider.name),
     enabled: provider.enabled,
   };
+}
+
+function inferProtocol(name: string): ProviderDraft["protocol"] {
+  return name.toLowerCase() === "anthropic" ? "anthropic" : "openai";
 }
 
 function formatError(error: unknown) {

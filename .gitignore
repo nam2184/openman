@@ -27,3 +27,5 @@ coverage/
 *.temp
 Cargo.lock
 opencode_methods.md
+
+opencode/

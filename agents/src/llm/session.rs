@@ -487,9 +487,8 @@ impl ProviderRegistry {
             as Arc<dyn LlmProvider>;
         let anthropic = Arc::new(crate::llm::providers::AnthropicProvider::new(None, None))
             as Arc<dyn LlmProvider>;
-        let minimax = Arc::new(crate::llm::providers::MiniMaxProvider::new(
-            None, None, None,
-        )) as Arc<dyn LlmProvider>;
+        let minimax = Arc::new(crate::llm::providers::MiniMaxTokenPlanProvider::new(None, None))
+            as Arc<dyn LlmProvider>;
 
         // Note: using blocking insert since we're in a sync context
         // In async context use register() which does .write().await

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use openman_agents::{
-    llm::providers::{AnthropicProvider, MiniMaxProvider, OpenAiProvider},
+    llm::providers::{AnthropicProvider, MiniMaxTokenPlanProvider, OpenAiProvider},
     llm::ContentPart,
-    ConversationService, LlmProvider, MessageRole, ProviderRegistry, ProviderService, SessionError,
-    SessionRunEvent, SessionRunner, SessionService,
+    ConversationService, LlmProvider, MessageRole, ProviderProtocol, ProviderRegistry,
+    ProviderService, SessionError, SessionRunEvent, SessionRunner, SessionService,
 };
 use tauri::{AppHandle, Emitter};
 
@@ -65,19 +65,17 @@ impl AgentService {
             _ => return,
         };
 
-        let provider: Arc<dyn LlmProvider> = match config.name.as_str() {
-            "openai" => Arc::new(OpenAiProvider::new(
+        let provider: Arc<dyn LlmProvider> = match &config.protocol {
+            ProviderProtocol::OpenAI if config.name == "minimax" => {
+                Arc::new(MiniMaxTokenPlanProvider::from_config(&config))
+            }
+            ProviderProtocol::OpenAI if config.name == "openai" => Arc::new(OpenAiProvider::new(
                 config.api_key.clone(),
                 config.base_url.clone(),
             )),
-            "anthropic" => Arc::new(AnthropicProvider::new(
+            ProviderProtocol::Anthropic if config.name == "anthropic" => Arc::new(AnthropicProvider::new(
                 config.api_key.clone(),
                 config.base_url.clone(),
-            )),
-            "minimax" => Arc::new(MiniMaxProvider::new(
-                config.api_key.clone(),
-                config.base_url.clone(),
-                None,
             )),
             _ => return,
         };

@@ -6,15 +6,16 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::Stream;
 
-use super::events::{FinishReason, LlmEvent, ToolDefinition, Usage};
+use super::events::{FinishReason, LlmEvent, Usage};
 use super::request::{LlmError, LlmMessage, LlmRequest, LlmResponse};
 
 pub mod anthropic;
-pub mod minimax;
 pub mod openai;
+mod openai_compatible_chat;
+pub mod minimax_token_plan;
 
 pub use anthropic::AnthropicProvider;
-pub use minimax::MiniMaxProvider;
+pub use minimax_token_plan::MiniMaxTokenPlanProvider;
 pub use openai::OpenAiProvider;
 
 #[async_trait]

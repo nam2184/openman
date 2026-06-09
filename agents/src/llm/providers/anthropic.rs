@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 use super::{parse_anthropic_event, LlmError, LlmProvider, LlmStream, ToolResultInject};
-use crate::llm::events::{LlmEvent, Usage};
-use crate::llm::request::{LlmMessage, LlmRequest};
+use crate::llm::events::LlmEvent;
+use crate::llm::request::LlmRequest;
 
 pub struct AnthropicProvider {
     api_key: Option<String>,
@@ -270,6 +269,9 @@ impl LlmProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::events::LlmEvent;
+    use crate::llm::request::LlmMessage;
+    use futures_util::StreamExt;
 
     #[test]
     fn provider_creation() {
@@ -284,5 +286,37 @@ mod tests {
         let provider = AnthropicProvider::new(None, None);
         assert_eq!(provider.api_key(), Some("env-key"));
         std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[tokio::test]
+    async fn stream_produces_events_or_http_error() {
+        let provider = AnthropicProvider::new(Some("invalid-anthropic-key".to_string()), None);
+        let request = LlmRequest::new("claude-3-5-sonnet-20241022", "anthropic")
+            .with_message(LlmMessage::user("say hello"));
+
+        let result = provider.stream(request).await;
+
+        if let Ok(stream) = result {
+            let events: Vec<_> = stream.events.collect().await;
+            assert!(!events.is_empty(), "stream should produce at least one event");
+            let has_text_or_error = events.iter().any(|e| {
+                matches!(e, LlmEvent::TextDelta { .. })
+                    || matches!(e, LlmEvent::ReasoningDelta { .. })
+                    || matches!(e, LlmEvent::ProviderError { .. })
+                    || matches!(e, LlmEvent::Finish { .. })
+            });
+            assert!(has_text_or_error, "stream should contain text, reasoning, error, or finish event: {events:?}");
+        } else {
+            let err = match result {
+                Err(e) => e,
+                _ => unreachable!("expected error"),
+            };
+            assert!(
+                err.code.starts_with("http_"),
+                "should be an HTTP error, got: {} - {}",
+                err.code,
+                err.message
+            );
+        }
     }
 }

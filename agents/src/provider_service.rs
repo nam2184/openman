@@ -4,7 +4,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::database::{Database, ProviderConfigRepository};
-use crate::ProviderConfig;
+use crate::{ProviderConfig, ProviderProtocol};
 
 pub struct ProviderService {
     db_path: PathBuf,
@@ -36,9 +36,10 @@ impl ProviderService {
             ProviderConfig::new(
                 "anthropic".to_string(),
                 "claude-3-5-sonnet-20241022".to_string(),
+                ProviderProtocol::Anthropic,
             ),
-            ProviderConfig::new("openai".to_string(), "gpt-4o".to_string()),
-            ProviderConfig::new("minimax".to_string(), "minimax-01".to_string()),
+            ProviderConfig::new("openai".to_string(), "gpt-4o".to_string(), ProviderProtocol::OpenAI),
+            ProviderConfig::new("minimax".to_string(), "MiniMax-M3".to_string(), ProviderProtocol::OpenAI),
         ]
     }
 

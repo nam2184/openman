@@ -23,6 +23,7 @@ export interface ProviderConfig {
   model: string;
   api_key?: string | null;
   base_url?: string | null;
+  protocol: "openai" | "anthropic";
   enabled: boolean;
 }
 

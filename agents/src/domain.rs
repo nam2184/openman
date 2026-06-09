@@ -208,17 +208,42 @@ pub struct ProviderConfig {
     pub model: String,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
+    pub protocol: ProviderProtocol,
     pub enabled: bool,
 }
 
 impl ProviderConfig {
-    pub fn new(name: String, model: String) -> Self {
+    pub fn new(name: String, model: String, protocol: ProviderProtocol) -> Self {
         Self {
             name,
             model,
             api_key: None,
             base_url: None,
+            protocol,
             enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderProtocol {
+    OpenAI,
+    Anthropic,
+}
+
+impl ProviderProtocol {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenAI => "openai",
+            Self::Anthropic => "anthropic",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        match name.to_lowercase().as_str() {
+            "anthropic" => Self::Anthropic,
+            _ => Self::OpenAI,
         }
     }
 }
