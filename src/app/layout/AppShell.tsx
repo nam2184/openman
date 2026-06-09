@@ -1,15 +1,23 @@
+import { useEffect } from "react";
 import { useProjectStore } from "../../features/project/projectStore";
-import { SessionWorkspace } from "../../features/sessions/SessionWorkspace";
+import { useAppStore } from "../../features/app/appStore";
+import { SessionWorkspace } from "../../pages/sessions/SessionWorkspace";
 import { ProjectSidebar } from "./components/ProjectSidebar";
+import { SettingsPage } from "./components/SettingsPage";
 
 export function AppShell() {
   const currentProject = useProjectStore((state) => state.currentProject);
+  const { view, loadSettings, setView } = useAppStore();
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#1e1e2e] text-[#cdd6f4]">
-      <ProjectSidebar project={currentProject} />
+    <div className="flex h-screen overflow-hidden bg-black text-white">
+      <ProjectSidebar project={currentProject} onOpenSettings={() => setView("settings")} />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <SessionWorkspace />
+        {view === "settings" ? <SettingsPage /> : <SessionWorkspace />}
       </main>
     </div>
   );

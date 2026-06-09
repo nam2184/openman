@@ -18,7 +18,9 @@ impl FileService {
 
     pub fn list_directory(path: &Path) -> Result<Vec<FileEntry>, String> {
         let mut entries = Vec::new();
-        for entry in std::fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))? {
+        for entry in
+            std::fs::read_dir(path).map_err(|e| format!("Failed to read directory: {}", e))?
+        {
             let entry = entry.map_err(|e| e.to_string())?;
             let metadata = entry.metadata().map_err(|e| e.to_string())?;
             entries.push(FileEntry {
@@ -28,12 +30,10 @@ impl FileService {
                 size: metadata.len(),
             });
         }
-        entries.sort_by(|a, b| {
-            match (a.is_dir, b.is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            }
+        entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
         Ok(entries)
     }
@@ -68,8 +68,13 @@ pub fn get_file_tree(path: &Path, max_depth: usize) -> Result<FileTreeNode, Stri
     build_tree_node(path, 0, max_depth)
 }
 
-fn build_tree_node(path: &Path, current_depth: usize, max_depth: usize) -> Result<FileTreeNode, String> {
-    let name = path.file_name()
+fn build_tree_node(
+    path: &Path,
+    current_depth: usize,
+    max_depth: usize,
+) -> Result<FileTreeNode, String> {
+    let name = path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();

@@ -1,7 +1,7 @@
-use std::path::Path;
-use crate::services::file_service::{FileService, FileEntry};
 use crate::services::file_service::get_file_tree as build_file_tree;
 use crate::services::file_service::FileTreeNode;
+use crate::services::file_service::{FileEntry, FileService};
+use std::path::Path;
 
 #[tauri::command]
 pub async fn read_file(path: String) -> Result<String, String> {

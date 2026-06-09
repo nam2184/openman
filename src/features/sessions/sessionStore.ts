@@ -18,6 +18,14 @@ export interface AgentSession {
   created_at: string;
 }
 
+export interface ProviderConfig {
+  name: string;
+  model: string;
+  api_key?: string | null;
+  base_url?: string | null;
+  enabled: boolean;
+}
+
 interface SessionInitPayload {
   sessions: AgentSession[];
   groups: SessionGroup[];
@@ -30,6 +38,7 @@ interface SessionState {
   initialize: () => Promise<void>;
   createSession: (projectId: string, directory: string) => Promise<string>;
   setActiveSession: (id: string) => void;
+  updateSessionProvider: (id: string, provider: string, model: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   createGroup: (sessionIds: string[]) => Promise<string>;
   deleteGroup: (id: string) => Promise<void>;
@@ -66,11 +75,16 @@ export const useSessionStore = create<SessionState>((set, get) => {
     initialize: refreshAll,
 
     createSession: async (projectId, directory) => {
+      const providerConfigs = await invoke<ProviderConfig[]>("get_provider_configs");
+      const activeConfig = providerConfigs.find((config) => config.enabled) ?? providerConfigs[0];
+      const provider = activeConfig?.name ?? "anthropic";
+      const model = activeConfig?.model ?? "claude-3-5-sonnet-20241022";
+
       const id = await invoke<string>("create_session", {
         projectId,
         directory,
-        provider: "anthropic",
-        model: "claude-3-5-sonnet-20241022",
+        provider,
+        model,
       });
 
       await refreshSessions();
@@ -79,6 +93,15 @@ export const useSessionStore = create<SessionState>((set, get) => {
     },
 
     setActiveSession: (id) => set({ activeSessionId: id }),
+
+    updateSessionProvider: async (id, provider, model) => {
+      await invoke("update_session_provider", {
+        sessionId: id,
+        provider,
+        model,
+      });
+      await refreshSessions();
+    },
 
     deleteSession: async (id) => {
       await invoke("delete_session", { id });

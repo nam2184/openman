@@ -1,8 +1,8 @@
-use std::path::Path;
-use tauri::State;
-use openman_agents::Project;
 use crate::services::project_service::ProjectService;
+use openman_agents::Project;
+use std::path::Path;
 use std::sync::Arc;
+use tauri::State;
 
 #[tauri::command]
 pub async fn create_project(

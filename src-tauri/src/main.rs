@@ -2,33 +2,28 @@ use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod commands;
-mod db;
 mod error;
 mod services;
 
-use services::agent_runtime::{create_agent_runtime, AgentRuntime};
+use openman_agents::{
+    create_conversation_service, ConversationService, ProviderService, SessionService,
+};
+use services::agent_service::AgentService;
 use services::memory_service::MemoryService;
-use services::conversation_service::create_conversation_service;
-use services::conversation_service::ConversationService;
 use services::project_service::ProjectService;
-use services::session_service::SessionService;
 use services::settings_service::SettingsService;
 use services::stack_detector::StackDetector;
-use services::tree_sitter::TreeSitterService;
 use services::watcher_service::WatcherService;
-use services::context_indexer::ContextIndexer;
 
 pub struct AppState {
     pub project_service: Arc<ProjectService>,
-    pub agent_runtime: Arc<AgentRuntime>,
+    pub agent_service: Arc<AgentService>,
     pub session_service: Arc<SessionService>,
     pub conversation_service: Arc<ConversationService>,
     pub settings_service: Arc<SettingsService>,
     pub memory_service: Arc<MemoryService>,
     pub stack_detector: Arc<StackDetector>,
-    pub tree_sitter: Arc<TreeSitterService>,
     pub watcher_service: Arc<WatcherService>,
-    pub context_indexer: Arc<ContextIndexer>,
 }
 
 fn setup_logging() {
@@ -56,12 +51,9 @@ fn default_log_filter() -> &'static str {
 pub fn run() {
     setup_logging();
 
-    let tree_sitter = TreeSitterService::new();
     let stack_detector = StackDetector::new();
     let memory_service = MemoryService::new();
     let watcher_service = WatcherService::new();
-    let context_indexer = ContextIndexer::new(Arc::clone(&tree_sitter));
-    let agent_runtime = create_agent_runtime(Arc::clone(&tree_sitter));
 
     let app_dirs = directories::ProjectDirs::from("ai", "openman", "openman");
     let app_data_dir = app_dirs
@@ -75,14 +67,20 @@ pub fn run() {
 
     let db_path = app_data_dir.join("openman.sqlite");
     let project_service = ProjectService::new(db_path.clone(), Arc::clone(&stack_detector));
-    let session_service = SessionService::new(db_path);
+    let session_service = SessionService::new(db_path.clone());
     let conversation_service = create_conversation_service(app_data_dir.join("conversations"));
+    let provider_service = ProviderService::new(db_path.clone());
 
     let settings_service = SettingsService::new(app_config_dir);
-
     if let Err(e) = settings_service.load() {
         tracing::warn!("Failed to load settings: {}", e);
     }
+
+    let agent_service = AgentService::new(
+        Arc::clone(&session_service),
+        Arc::clone(&conversation_service),
+        Arc::clone(&provider_service),
+    );
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -90,19 +88,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
             project_service: Arc::clone(&project_service),
-            agent_runtime: Arc::clone(&agent_runtime),
+            agent_service: Arc::clone(&agent_service),
             session_service: Arc::clone(&session_service),
             conversation_service: Arc::clone(&conversation_service),
             settings_service: Arc::clone(&settings_service),
             memory_service: Arc::clone(&memory_service),
             stack_detector: Arc::clone(&stack_detector),
-            tree_sitter: Arc::clone(&tree_sitter),
             watcher_service: Arc::clone(&watcher_service),
-            context_indexer: Arc::clone(&context_indexer),
         })
+        .manage(agent_service)
+        .manage(provider_service)
         .manage(conversation_service)
         .manage(project_service)
-        .manage(agent_runtime)
         .manage(session_service)
         .manage(settings_service)
         .invoke_handler(tauri::generate_handler![
@@ -117,11 +114,8 @@ pub fn run() {
             commands::file_commands::list_directory,
             commands::file_commands::search_files,
             commands::file_commands::get_file_tree,
-            commands::agent_commands::create_agent_session,
             commands::agent_commands::send_message,
-            commands::agent_commands::update_agent_context,
-            commands::agent_commands::add_memory_fact,
-            commands::agent_commands::parse_code_context,
+            commands::agent_commands::update_session_provider,
             commands::session_commands::init_sessions,
             commands::session_commands::create_session,
             commands::session_commands::get_session,
@@ -140,9 +134,12 @@ pub fn run() {
             commands::conversation_commands::compact_conversation,
             commands::conversation_commands::delete_conversation,
             commands::settings_commands::get_settings,
-            commands::settings_commands::update_provider,
-            commands::settings_commands::set_active_provider,
             commands::settings_commands::save_settings,
+            commands::provider_commands::get_provider_configs,
+            commands::provider_commands::get_provider_config,
+            commands::provider_commands::upsert_provider_config,
+            commands::provider_commands::delete_provider_config,
+            commands::provider_commands::set_active_provider,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

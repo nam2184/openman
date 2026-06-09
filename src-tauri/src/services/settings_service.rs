@@ -1,49 +1,18 @@
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::RwLock;
-use openman_agents::Provider;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
-    pub providers: Vec<ProviderConfig>,
-    pub active_provider: String,
-    pub active_model: String,
     pub theme: String,
     pub editor_font_size: u32,
     pub editor_tab_size: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    pub name: String,
-    pub model: String,
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub enabled: bool,
-}
-
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            providers: vec![
-                ProviderConfig {
-                    name: "anthropic".to_string(),
-                    model: "claude-3-5-sonnet-20241022".to_string(),
-                    api_key: None,
-                    base_url: None,
-                    enabled: true,
-                },
-                ProviderConfig {
-                    name: "openai".to_string(),
-                    model: "gpt-4o".to_string(),
-                    api_key: None,
-                    base_url: None,
-                    enabled: true,
-                },
-            ],
-            active_provider: "anthropic".to_string(),
-            active_model: "claude-3-5-sonnet-20241022".to_string(),
             theme: "dark".to_string(),
             editor_font_size: 14,
             editor_tab_size: 2,
@@ -82,8 +51,7 @@ impl SettingsService {
 
     pub fn save(&self) -> Result<(), String> {
         let settings = self.settings.read().clone();
-        let content = serde_json::to_string_pretty(&settings)
-            .map_err(|e| e.to_string())?;
+        let content = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
 
         if let Some(parent) = self.config_path.parent() {
             std::fs::create_dir_all(parent)
@@ -98,29 +66,8 @@ impl SettingsService {
         self.settings.read().clone()
     }
 
-    pub fn update_provider(&self, name: String, updates: ProviderConfig) {
-        let mut settings = self.settings.write();
-        if let Some(provider) = settings.providers.iter_mut().find(|p| p.name == name) {
-            *provider = updates;
-        }
-    }
-
-    pub fn set_active_provider(&self, name: String, model: String) {
-        let mut settings = self.settings.write();
-        settings.active_provider = name;
-        settings.active_model = model;
-    }
-
-    pub fn get_provider(&self, name: &str) -> Option<Provider> {
-        let settings = self.settings.read();
-        settings.providers.iter()
-            .find(|p| p.name == name)
-            .map(|p| Provider {
-                name: p.name.clone(),
-                model: p.model.clone(),
-                api_key: p.api_key.clone(),
-                base_url: p.base_url.clone(),
-            })
+    pub fn update_settings(&self, updates: AppSettings) {
+        *self.settings.write() = updates;
     }
 }
 

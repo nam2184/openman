@@ -1,16 +1,13 @@
-use async_trait::async_trait;
+pub mod events;
+pub mod providers;
+pub mod request;
+pub mod session;
 
-use crate::domain::{LlmMessage, LlmResponse};
-
-#[async_trait]
-pub trait LlmProvider: Send + Sync {
-    async fn complete(&self, model: &str, messages: &[LlmMessage]) -> Result<LlmResponse, String>;
-
-    fn complete_sync(&self, model: &str, messages: &[LlmMessage]) -> Result<String, String> {
-        let runtime = tokio::runtime::Runtime::new().map_err(|error| error.to_string())?;
-        runtime.block_on(self.complete(model, messages)).map(|response| response.content)
-    }
-
-    fn provider_name(&self) -> &str;
-    fn supported_models(&self) -> Vec<String>;
-}
+pub use events::{FinishReason, LlmEvent, ToolContentPart, ToolDefinition, ToolResultValue, Usage};
+pub use providers::{
+    AnthropicProvider, LlmProvider, LlmStream, MiniMaxProvider, OpenAiProvider, ToolResultInject,
+};
+pub use request::{ContentPart, LlmError, LlmMessage, LlmRequest, LlmResponse, ToolCallEntry};
+pub use session::{
+    ProviderRegistry, RunResult, SessionError, SessionEventSink, SessionRunEvent, SessionRunner,
+};

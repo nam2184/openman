@@ -40,7 +40,9 @@ pub struct TechStack {
 
 impl TechStack {
     pub fn new() -> Self {
-        Self { languages: Vec::new() }
+        Self {
+            languages: Vec::new(),
+        }
     }
 
     pub fn add_language(&mut self, language: String) {
@@ -196,6 +198,27 @@ impl Provider {
             model,
             api_key: None,
             base_url: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub name: String,
+    pub model: String,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub enabled: bool,
+}
+
+impl ProviderConfig {
+    pub fn new(name: String, model: String) -> Self {
+        Self {
+            name,
+            model,
+            api_key: None,
+            base_url: None,
+            enabled: true,
         }
     }
 }

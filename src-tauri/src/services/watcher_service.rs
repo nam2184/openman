@@ -1,9 +1,9 @@
+use notify::{Event, RecursiveMode, Watcher};
+use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use notify::{Watcher, RecursiveMode, Event};
-use parking_lot::RwLock;
-use std::collections::HashMap;
 
 pub struct WatcherService {
     watchers: RwLock<HashMap<String, notify::RecommendedWatcher>>,
@@ -58,9 +58,11 @@ impl WatcherService {
                     };
                 }
             }
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
 
-        watcher.watch(&path, RecursiveMode::Recursive)
+        watcher
+            .watch(&path, RecursiveMode::Recursive)
             .map_err(|e| e.to_string())?;
 
         self.watchers.write().insert(project_id.clone(), watcher);

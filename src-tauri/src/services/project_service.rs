@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use openman_agents::Project;
-use crate::db::connection::Database;
-use crate::db::repositories::ProjectRepository;
+
+use openman_agents::{Database, Project, ProjectRepository};
+
 use crate::services::stack_detector::StackDetector;
 
 pub struct ProjectService {
@@ -34,7 +34,8 @@ impl ProjectService {
             return Err(format!("Path is not a directory: {}", path.display()));
         }
 
-        let name = path.file_name()
+        let name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("Unknown")
             .to_string();
@@ -64,7 +65,6 @@ impl ProjectService {
 
         Ok(project)
     }
-
 
     pub fn get_project(&self, id: &str) -> Option<Project> {
         if let Ok(db) = self.db() {

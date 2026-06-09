@@ -42,7 +42,10 @@ impl StackDetector {
             .build();
 
         for entry in walker.flatten() {
-            if !entry.file_type().is_some_and(|file_type| file_type.is_file()) {
+            if !entry
+                .file_type()
+                .is_some_and(|file_type| file_type.is_file())
+            {
                 continue;
             }
 
@@ -118,7 +121,9 @@ impl StackDetector {
     fn detect_by_filename(file_name: &str) -> Option<&'static str> {
         match file_name {
             "Cargo.toml" | "Cargo.lock" => Some("Rust"),
-            "package.json" | "pnpm-lock.yaml" | "yarn.lock" | "package-lock.json" => Some("JavaScript"),
+            "package.json" | "pnpm-lock.yaml" | "yarn.lock" | "package-lock.json" => {
+                Some("JavaScript")
+            }
             "tsconfig.json" => Some("TypeScript"),
             "pyproject.toml" | "requirements.txt" | "setup.py" | "Pipfile" => Some("Python"),
             "go.mod" | "go.sum" => Some("Go"),

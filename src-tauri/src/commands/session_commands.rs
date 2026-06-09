@@ -1,7 +1,6 @@
+use openman_agents::{AgentSession, ConversationService, SessionGroup, SessionService};
 use std::sync::Arc;
 use tauri::State;
-use openman_agents::{AgentSession, SessionGroup};
-use crate::services::session_service::SessionService;
 
 #[derive(serde::Serialize)]
 pub struct SessionInitPayload {
@@ -26,8 +25,14 @@ pub async fn create_session(
     provider: String,
     model: String,
     session_service: State<'_, Arc<SessionService>>,
+    conversation_service: State<'_, Arc<ConversationService>>,
 ) -> Result<String, String> {
-    session_service.create_session(project_id, directory, provider, model)
+    let id = session_service.create_session(project_id, directory, provider, model)?;
+    if let Err(error) = conversation_service.create_conversation(&id) {
+        let _ = session_service.delete_session(&id);
+        return Err(error);
+    }
+    Ok(id)
 }
 
 #[tauri::command]
@@ -49,7 +54,9 @@ pub async fn get_all_sessions(
 pub async fn delete_session(
     id: String,
     session_service: State<'_, Arc<SessionService>>,
+    conversation_service: State<'_, Arc<ConversationService>>,
 ) -> Result<(), String> {
+    conversation_service.delete_conversation(&id)?;
     session_service.delete_session(&id)
 }
 

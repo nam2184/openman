@@ -1,7 +1,6 @@
+use openman_agents::{ConversationFile, ConversationMessage, ConversationService, MessageRole};
 use std::sync::Arc;
 use tauri::State;
-use openman_agents::MessageRole;
-use crate::services::conversation_service::{ConversationService, ConversationFile, ConversationMessage};
 
 #[tauri::command]
 pub async fn append_message(

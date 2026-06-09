@@ -1,23 +1,24 @@
-import { Plus, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Badge } from "../../../components/ui/badge";
+import { Plus, Settings, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Input } from "../../../components/ui/input";
 import { ScrollArea } from "../../../components/ui/scroll-area";
-import { Separator } from "../../../components/ui/separator";
 import { cn } from "../../../lib/utils";
 import { useProjectStore, type Project } from "../../../features/project/projectStore";
 
 interface ProjectSidebarProps {
   project: Project | null;
+  onOpenSettings: () => void;
 }
 
-export function ProjectSidebar({ project }: ProjectSidebarProps) {
+export function ProjectSidebar({ project, onOpenSettings }: ProjectSidebarProps) {
   const { createProject, initializeProjects, projects, setCurrentProject } = useProjectStore();
   const [projectName, setProjectName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isAddingProject, setIsAddingProject] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const projectInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     initializeProjects().catch((initError) => {
@@ -31,13 +32,22 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
     [projects],
   );
 
+  useEffect(() => {
+    if (isAddingProject) {
+      projectInputRef.current?.focus();
+    }
+  }, [isAddingProject]);
+
   const submitProject = async () => {
+    if (!projectName.trim()) return;
+
     setError(null);
     setIsCreating(true);
 
     try {
       await createProject(projectName);
       setProjectName("");
+      setIsAddingProject(false);
     } catch (createError) {
       setError(formatError(createError));
       console.error("Failed to create project:", createError);
@@ -47,54 +57,53 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
   };
 
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col border-r border-[#313244] bg-[#181825]">
-      <div className="space-y-4 p-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#313244] text-[#89b4fa]">
-            <Sparkles className="h-4 w-4" />
-          </div>
-          <div>
-            <h1 className="text-base font-semibold text-[#cdd6f4]">OpenMan</h1>
-            <p className="text-xs text-[#6c7086]">Project session canvases</p>
-          </div>
+    <aside className="flex w-[200px] shrink-0 flex-col border-r border-[#1f1f1f] bg-[#050505]">
+      <div className="border-b border-[#1f1f1f] p-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-[#737373]">Projects</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setIsAddingProject((value) => !value)}
+            aria-label="Add project"
+          >
+            {isAddingProject ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          </Button>
         </div>
 
-        <Card className="bg-[#1e1e2e]/40">
-          <CardHeader>
-            <CardTitle>New Project</CardTitle>
-            <CardDescription>Projects are containers for session canvases.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        {isAddingProject && (
+          <div className="mt-3 flex gap-2">
             <Input
+              ref={projectInputRef}
               value={projectName}
               placeholder="Project name"
               onChange={(event) => setProjectName(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   submitProject();
+                } else if (event.key === "Escape") {
+                  setProjectName("");
+                  setIsAddingProject(false);
                 }
               }}
+              className="h-8"
             />
-            <Button className="w-full" onClick={submitProject} disabled={isCreating || !projectName.trim()}>
+            <Button size="sm" onClick={submitProject} disabled={isCreating || !projectName.trim()}>
               <Plus className="h-4 w-4" />
-              {isCreating ? "Creating" : "Create Project"}
+              {isCreating ? "Adding" : "Add"}
             </Button>
-            {error && <p className="text-xs text-[#f38ba8]">{error}</p>}
-          </CardContent>
-        </Card>
+          </div>
+        )}
+
+        {error && <p className="mt-2 text-xs text-[#ff5f5f]">{error}</p>}
       </div>
 
-      <Separator />
-
       <div className="min-h-0 flex-1 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-[#6c7086]">Projects</h2>
-          <Badge variant="secondary">{projects.length}</Badge>
-        </div>
         <ScrollArea className="h-full">
           <div className="space-y-2 pr-2">
             {sortedProjects.length === 0 ? (
-              <Card className="border-dashed bg-[#1e1e2e]/40">
+              <Card className="border-dashed bg-black">
                 <CardHeader>
                   <CardTitle>No projects yet</CardTitle>
                   <CardDescription>Create a project before adding sessions.</CardDescription>
@@ -105,17 +114,23 @@ export function ProjectSidebar({ project }: ProjectSidebarProps) {
                 <button
                   key={item.id}
                   className={cn(
-                    "w-full rounded-xl border border-[#313244] bg-[#1e1e2e]/40 p-3 text-left transition-colors hover:border-[#45475a]",
-                    project?.id === item.id && "border-[#89b4fa] bg-[#313244]",
+                    "w-full rounded-xl border border-[#2a2a2a] bg-black p-3 text-left transition-colors hover:border-[#525252]",
+                    project?.id === item.id && "border-white bg-[#111111]",
                   )}
                   onClick={() => setCurrentProject(item)}
                 >
-                  <span className="truncate text-sm font-medium text-[#cdd6f4]">{item.name}</span>
+                  <span className="truncate text-sm font-medium text-white">{item.name}</span>
                 </button>
               ))
             )}
           </div>
         </ScrollArea>
+      </div>
+      <div className="p-4">
+        <Button variant="secondary" className="w-full justify-start bg-transparent border-none outline-none" onClick={onOpenSettings}>
+          <Settings className="h-4 w-4" />
+          Settings
+        </Button>
       </div>
     </aside>
   );
