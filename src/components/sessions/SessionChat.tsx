@@ -164,7 +164,7 @@ export function SessionChat({
     <div className="pointer-events-none fixed inset-0 z-50">
       <div
         className={cn(
-          "pointer-events-auto fixed flex h-[600px] max-h-[calc(100vh-32px)] w-[700px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#050505]/95 text-white shadow-2xl shadow-black/70 backdrop-blur",
+          "pointer-events-auto fixed flex h-[600px] max-h-[calc(100vh-32px)] w-[700px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-none border border-[#1f1f1f] bg-[#0a0a0a] text-white shadow-none",
         )}
         role="dialog"
         aria-modal="false"
@@ -209,7 +209,7 @@ export function SessionChat({
                     setConfigStatus(null);
                     setConfigError(null);
                   }}
-                  className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white"
+                  className="h-9 w-full rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white"
                 >
                   {providerOptions.map((provider) => (
                     <option key={provider.name} value={provider.name}>{provider.name}</option>
@@ -232,7 +232,7 @@ export function SessionChat({
                   setConfigStatus(null);
                   setConfigError(null);
                 }}
-                className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-9 w-full rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={modelOptions.length === 0}
               >
                 {modelOptions.length === 0 ? (
@@ -282,7 +282,7 @@ export function SessionChat({
                   >
                     <div
                       className={cn(
-                        "max-w-[80%] whitespace-pre-wrap break-words rounded-xl px-4 py-2 text-sm",
+                        "max-w-[80%] whitespace-pre-wrap break-words rounded-none px-4 py-2 text-sm",
                         message.role === "user"
                           ? "bg-white text-black"
                           : "border border-[#2a2a2a] bg-[#111111] text-[#f5f5f5]",
@@ -296,10 +296,11 @@ export function SessionChat({
             )}
             {isSending && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-xl border border-[#2a2a2a] bg-[#111111] px-4 py-2">
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-white" />
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-white" />
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-white" />
+                <div className="flex items-center gap-2 rounded-none border border-[#1f1f1f] bg-[#0a0a0a] px-4 py-2 text-xs text-[#737373]">
+                  <span>◌</span>
+                  <span>◌</span>
+                  <span>◌</span>
+                  <span>thinking</span>
                 </div>
               </div>
             )}

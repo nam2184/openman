@@ -99,6 +99,14 @@ impl LlmProvider for OpenAiCompatibleChatProvider {
         let messages = lower_messages(&request);
         let tools = lower_tools(&request);
 
+        tracing::debug!(
+            "llm request: provider={} url={} model={} key={:?}",
+            self.provider_name,
+            self.chat_completions_url(),
+            request.model,
+            api_key,
+        );
+
         let mut body = serde_json::json!({
             "model": request.model,
             "messages": messages,
@@ -126,10 +134,19 @@ impl LlmProvider for OpenAiCompatibleChatProvider {
         let abort_tx = Arc::new(abort_tx);
         let (tool_result_tx, mut tool_result_rx) = mpsc::channel::<ToolResultInject>(32);
 
+        let auth_header = format!("Bearer {api_key}");
+        tracing::debug!(
+            "llm request header: provider={} url={} model={} Authorization={:?}",
+            self.provider_name,
+            self.chat_completions_url(),
+            request.model,
+            auth_header,
+        );
+
         let response = self
             .http_client
             .post(self.chat_completions_url())
-            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Authorization", &auth_header)
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -139,6 +156,14 @@ impl LlmProvider for OpenAiCompatibleChatProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
+            tracing::warn!(
+                "llm http error: provider={} url={} model={} status={} body={}",
+                self.provider_name,
+                self.chat_completions_url(),
+                request.model,
+                status.as_u16(),
+                &text.chars().take(500).collect::<String>(),
+            );
             return Err(LlmError::new(&format!("http_{}", status.as_u16()), &text)
                 .provider(&self.provider_name)
                 .model(&request.model));

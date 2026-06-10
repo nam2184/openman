@@ -1,6 +1,6 @@
 # Openman
 
-An open-source AI coding agent built with Rust and Tauri.
+An open-source AI coding agent with peer to peer session context aggregation and snippet focused interjection built with Rust and Tauri.
 
 ## Features
 
@@ -21,7 +21,7 @@ Providers that expose an OpenAI Chat Completions-compatible endpoint at `/v1/cha
 | Provider | Base URL | Notes |
 |----------|----------|-------|
 | **OpenAI** | `https://api.openai.com/v1` | GPT-4o, GPT-4o-mini, o3, o4-mini |
-| **MiniMax Token Plan** | `https://api.minimaxi.com/v1` | MiniMax-M3, MiniMax-M2.7, MiniMax-M2.5 |
+| **MiniMax Token Plan** | `https://api.minimax.io/v1` | MiniMax-M3, MiniMax-M2.7, MiniMax-M2.5 |
 
 ### Anthropic Messages (`Protocol::Anthropic`)
 

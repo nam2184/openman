@@ -126,7 +126,7 @@ export function SettingsPage() {
         <div className="mx-auto max-w-2xl space-y-8 p-6">
           <section className="space-y-4">
             <h2 className="text-sm font-medium text-[#d4d4d4]">Appearance</h2>
-            <div className="rounded-lg border border-[#2a2a2a] bg-[#0a0a0a] p-4">
+            <div className="rounded-none border border-[#1f1f1f] bg-[#0a0a0a] p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Theme</p>
@@ -145,12 +145,12 @@ export function SettingsPage() {
 
           <section className="space-y-4">
             <h2 className="text-sm font-medium text-[#d4d4d4]">AI Configuration</h2>
-            <div className="space-y-4 rounded-lg border border-[#2a2a2a] bg-[#0a0a0a] p-4">
+            <div className="space-y-4 rounded-none border border-[#1f1f1f] bg-[#0a0a0a] p-4">
               <div className="flex gap-2">
                 <select
                   value={selectedProviderName}
                   onChange={(event) => selectProvider(event.target.value)}
-                  className="h-9 min-w-0 flex-1 rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white"
+                  className="h-9 min-w-0 flex-1 rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white"
                 >
                   {providers.map((provider) => (
                     <option key={provider.name} value={provider.name}>{provider.name}</option>
@@ -192,7 +192,7 @@ export function SettingsPage() {
                 <select
                   value={providerDraft.protocol}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) => setProviderDraft((draft) => ({ ...draft, protocol: event.target.value as ProviderDraft["protocol"] }))}
-                  className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white"
+                  className="h-9 w-full rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white"
                 >
                   <option value="openai">OpenAI-compatible chat</option>
                   <option value="anthropic">Anthropic messages</option>
@@ -203,7 +203,7 @@ export function SettingsPage() {
                 <select
                   value={providerDraft.model}
                   onChange={(event: ChangeEvent<HTMLSelectElement>) => setProviderDraft((draft) => ({ ...draft, model: event.target.value }))}
-                  className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-9 w-full rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={modelOptions.length === 0}
                 >
                   {modelOptions.length === 0 ? (
@@ -232,7 +232,7 @@ export function SettingsPage() {
                   placeholder="Optional provider endpoint"
                 />
               </label>
-              <div className="rounded-md border border-[#1f1f1f] bg-[#050505] p-3 text-xs text-[#bdbdbd]">
+              <div className="rounded-none border border-[#1f1f1f] bg-[#050505] p-3 text-xs text-[#bdbdbd]">
                 <p className="text-[10px] uppercase tracking-wider text-[#737373]">Context budget (from model spec)</p>
                 <p className="mt-1">
                   Window: <span className="text-white">{modelContextWindow.toLocaleString()}</span> tokens
@@ -251,7 +251,7 @@ export function SettingsPage() {
                   type="checkbox"
                   checked={providerDraft.enabled}
                   onChange={(event) => setProviderDraft((draft) => ({ ...draft, enabled: event.target.checked }))}
-                  className="h-4 w-4 rounded border-[#2a2a2a] bg-black accent-white"
+                  className="h-4 w-4 rounded-none border-[#1f1f1f] bg-black accent-white"
                 />
                 Enabled for new sessions
               </label>

@@ -5,3 +5,4 @@ pub mod project_commands;
 pub mod provider_commands;
 pub mod session_commands;
 pub mod settings_commands;
+pub mod permission_commands;

@@ -137,7 +137,7 @@ export function SessionConfigPanel({ onClose }: SessionConfigPanelProps) {
         role="dialog"
         aria-modal="false"
         aria-label="Provider settings"
-        className="pointer-events-auto fixed flex w-[420px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-2xl border border-[#2a2a2a] bg-[#050505]/95 text-white shadow-2xl shadow-black/70 backdrop-blur"
+        className="pointer-events-auto fixed flex w-[420px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-none border border-[#1f1f1f] bg-[#0a0a0a] text-white shadow-none"
         style={{ left: position.x, top: position.y }}
       >
         <div
@@ -164,7 +164,7 @@ export function SessionConfigPanel({ onClose }: SessionConfigPanelProps) {
             <select
               value={selectedProviderName}
               onChange={(event) => selectProvider(event.target.value)}
-              className="h-9 min-w-0 flex-1 rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white"
+              className="h-9 min-w-0 flex-1 rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white"
             >
               {providers.map((provider) => (
                 <option key={provider.name} value={provider.name}>{provider.name}</option>
@@ -206,7 +206,7 @@ export function SessionConfigPanel({ onClose }: SessionConfigPanelProps) {
             <select
               value={providerDraft.protocol}
               onChange={(event) => setProviderDraft((draft) => ({ ...draft, protocol: event.target.value as ProviderDraft["protocol"] }))}
-              className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white"
+              className="h-9 w-full rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white"
             >
               <option value="openai">OpenAI-compatible chat</option>
               <option value="anthropic">Anthropic messages</option>
@@ -217,7 +217,7 @@ export function SessionConfigPanel({ onClose }: SessionConfigPanelProps) {
             <select
               value={providerDraft.model}
               onChange={(event) => setProviderDraft((draft) => ({ ...draft, model: event.target.value }))}
-              className="h-9 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#4a4a4a] focus:border-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-9 w-full rounded-none border border-[#1f1f1f] bg-black px-3 text-sm text-white outline-none transition-colors hover:border-[#2a2a2a] focus:border-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={modelOptions.length === 0}
             >
               {modelOptions.length === 0 ? (

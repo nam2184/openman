@@ -1,7 +1,6 @@
-import { Plus, Settings, X } from "lucide-react";
+import { Folder, Plus, Settings, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
 import { Input } from "../../../components/ui/input";
 import { ScrollArea } from "../../../components/ui/scroll-area";
 import { cn } from "../../../lib/utils";
@@ -58,13 +57,13 @@ export function ProjectSidebar({ project, onOpenSettings }: ProjectSidebarProps)
 
   return (
     <aside className="flex w-[200px] shrink-0 flex-col border-r border-[#1f1f1f] bg-[#050505]">
-      <div className="border-b border-[#1f1f1f] p-4">
+      <div className="p-4 pb-2">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-[#737373]">Projects</h2>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-7 w-7 bg-transparent text-[#737373] hover:bg-transparent hover:text-white"
             onClick={() => setIsAddingProject((value) => !value)}
             aria-label="Add project"
           >
@@ -99,27 +98,25 @@ export function ProjectSidebar({ project, onOpenSettings }: ProjectSidebarProps)
         {error && <p className="mt-2 text-xs text-[#ff5f5f]">{error}</p>}
       </div>
 
-      <div className="min-h-0 flex-1 p-4">
+      <div className="min-h-0 flex-1 px-4 pb-4">
         <ScrollArea className="h-full">
           <div className="space-y-2 pr-2">
             {sortedProjects.length === 0 ? (
-              <Card className="border-dashed bg-black">
-                <CardHeader>
-                  <CardTitle>No projects yet</CardTitle>
-                  <CardDescription>Create a project before adding sessions.</CardDescription>
-                </CardHeader>
-              </Card>
+              <p className="text-xs text-[#737373]">
+                No projects yet. Create a project before adding sessions.
+              </p>
             ) : (
               sortedProjects.map((item) => (
                 <button
                   key={item.id}
                   className={cn(
-                    "w-full rounded-xl border border-[#2a2a2a] bg-black p-3 text-left transition-colors hover:border-[#525252]",
-                    project?.id === item.id && "border-white bg-[#111111]",
+                    "flex w-full items-center gap-2 bg-transparent p-2 text-left transition-colors hover:text-white",
+                    project?.id === item.id ? "text-white" : "text-[#737373]",
                   )}
                   onClick={() => setCurrentProject(item)}
                 >
-                  <span className="truncate text-sm font-medium text-white">{item.name}</span>
+                  <Folder className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate text-sm font-medium">{item.name}</span>
                 </button>
               ))
             )}
@@ -127,9 +124,9 @@ export function ProjectSidebar({ project, onOpenSettings }: ProjectSidebarProps)
         </ScrollArea>
       </div>
       <div className="p-4">
-        <Button variant="secondary" className="w-full justify-start bg-transparent border-none outline-none" onClick={onOpenSettings}>
-          <Settings className="h-4 w-4" />
-          Settings
+        <Button variant="ghost" className="w-full justify-start gap-2 bg-transparent p-2 text-[#737373] hover:bg-transparent hover:text-white" onClick={onOpenSettings}>
+          <Settings className="h-3.5 w-3.5" />
+          <span className="text-sm font-medium">Settings</span>
         </Button>
       </div>
     </aside>

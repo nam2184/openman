@@ -5,7 +5,7 @@ use super::{LlmError, LlmProvider, LlmStream};
 use crate::llm::request::LlmRequest;
 use crate::ProviderConfig;
 
-pub const DEFAULT_BASE_URL: &str = "https://api.minimaxi.com/v1";
+pub const DEFAULT_BASE_URL: &str = "https://api.minimax.io/v1";
 pub const DEFAULT_MODEL: &str = "MiniMax-M3";
 
 pub struct MiniMaxTokenPlanProvider {
@@ -90,7 +90,7 @@ mod tests {
 
         assert_eq!(config.protocol, ProviderProtocol::OpenAI);
         assert_eq!(provider.model_base_url(), Some(DEFAULT_BASE_URL));
-        assert_eq!(provider.chat_completions_url(), "https://api.minimaxi.com/v1/chat/completions");
+        assert_eq!(provider.chat_completions_url(), "https://api.minimax.com/v1/chat/completions");
     }
 
     #[tokio::test]

@@ -42,7 +42,7 @@ export const SessionCard = forwardRef<HTMLDivElement, SessionCardProps>(
       <div
         ref={ref}
         className={cn(
-          "group relative flex cursor-pointer flex-col gap-2 rounded-xl border border-[#313244] bg-[#181825] p-4 transition-all hover:border-[#45475a] hover:bg-[#1e1e2e]",
+          "group relative flex cursor-pointer flex-col gap-2 rounded-none border border-[#1f1f1f] bg-[#0a0a0a] p-3 transition-colors hover:border-[#2a2a2a] hover:bg-[#111111]",
           className
         )}
         onClick={onClick}
@@ -50,12 +50,12 @@ export const SessionCard = forwardRef<HTMLDivElement, SessionCardProps>(
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#313244]">
-              <Folder className="h-4 w-4 text-[#89b4fa]" />
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-none border border-[#1f1f1f] bg-[#050505]">
+              <Folder className="h-3.5 w-3.5 text-[#d4d4d4]" />
             </div>
             <div className="min-w-0 flex-1">
-              <h3 className="truncate text-sm font-medium text-[#cdd6f4]">{directoryName}</h3>
-              <p className="truncate text-xs text-[#6c7086]">{directory}</p>
+              <h3 className="truncate text-sm font-medium text-white">{directoryName}</h3>
+              <p className="truncate text-xs text-[#737373]">{directory}</p>
             </div>
           </div>
           {onDelete && (
@@ -68,7 +68,7 @@ export const SessionCard = forwardRef<HTMLDivElement, SessionCardProps>(
                 onDelete();
               }}
             >
-              <span className="text-xs text-[#f38ba8]">×</span>
+              <span className="text-xs text-[#737373]">×</span>
             </Button>
           )}
         </div>
@@ -83,10 +83,10 @@ export const SessionCard = forwardRef<HTMLDivElement, SessionCardProps>(
         </div>
 
         {summary && (
-          <p className="line-clamp-2 text-xs text-[#6c7086]">{summary}</p>
+          <p className="line-clamp-2 text-xs text-[#737373]">{summary}</p>
         )}
 
-        <div className="flex items-center gap-3 text-[10px] text-[#6c7086]">
+        <div className="flex items-center gap-3 text-[10px] text-[#737373]">
           <span className="flex items-center gap-1">
             <MessageSquare className="h-3 w-3" />
             {messageCount ?? 0}

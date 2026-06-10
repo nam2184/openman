@@ -48,9 +48,9 @@ function PermissionPromptCard({
   const suggestedPatterns = prompt.always.length > 0 ? prompt.always : prompt.patterns;
 
   return (
-    <Card className="pointer-events-auto w-full max-w-2xl border-[#2a2a2a] bg-[#0a0a0a] p-4 shadow-2xl shadow-black/50">
+    <Card className="pointer-events-auto w-full max-w-2xl border-[#1f1f1f] bg-[#0a0a0a] p-4 shadow-none">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#2a2a2a] bg-[#111111]">
+        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-none border border-[#1f1f1f] bg-[#050505]">
           <Shield className="h-4 w-4 text-white" />
         </div>
         <div className="min-w-0 flex-1 space-y-2">

@@ -208,7 +208,7 @@ export function SessionWorkspace() {
         <div className="pointer-events-none absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
           <Button
             size="icon"
-            className="pointer-events-auto h-10 w-10 rounded-full border border-[#2a2a2a] shadow-2xl shadow-black/60"
+            className="pointer-events-auto h-9 w-9 rounded-none border border-[#1f1f1f] bg-[#0a0a0a] text-white shadow-none hover:border-[#2a2a2a] hover:bg-[#111111]"
             onClick={createSessionNode}
             disabled={isCreating || !currentProject}
             aria-label="Add session"
@@ -216,7 +216,7 @@ export function SessionWorkspace() {
           >
             <Plus className="h-5 w-5" />
           </Button>
-          {error && <span className="pointer-events-auto max-w-[320px] rounded-md border border-[#2a2a2a] bg-black px-3 py-2 text-xs text-[#ff5f5f] shadow-xl shadow-black/60">{error}</span>}
+          {error && <span className="pointer-events-auto max-w-[320px] rounded-none border border-[#1f1f1f] bg-black px-3 py-2 text-xs text-[#ff5f5f] shadow-none">{error}</span>}
         </div>
         <div className="min-w-0 flex-1 overflow-hidden">
           <SessionCanvas
