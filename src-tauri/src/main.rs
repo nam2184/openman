@@ -10,6 +10,7 @@ use openman_agents::{
 };
 use services::agent_service::AgentService;
 use services::memory_service::MemoryService;
+use services::permission_map::PermissionMap;
 use services::project_service::ProjectService;
 use services::settings_service::SettingsService;
 use services::stack_detector::StackDetector;
@@ -24,6 +25,7 @@ pub struct AppState {
     pub memory_service: Arc<MemoryService>,
     pub stack_detector: Arc<StackDetector>,
     pub watcher_service: Arc<WatcherService>,
+    pub permission_map: Arc<PermissionMap>,
 }
 
 fn setup_logging() {
@@ -82,6 +84,8 @@ pub fn run() {
         Arc::clone(&provider_service),
     );
 
+    let permission_map = Arc::new(PermissionMap::new());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -95,7 +99,9 @@ pub fn run() {
             memory_service: Arc::clone(&memory_service),
             stack_detector: Arc::clone(&stack_detector),
             watcher_service: Arc::clone(&watcher_service),
+            permission_map: Arc::clone(&permission_map),
         })
+        .manage(permission_map)
         .manage(agent_service)
         .manage(provider_service)
         .manage(conversation_service)
@@ -140,6 +146,8 @@ pub fn run() {
             commands::provider_commands::upsert_provider_config,
             commands::provider_commands::delete_provider_config,
             commands::provider_commands::set_active_provider,
+            commands::permission_commands::permission_list_pending,
+            commands::permission_commands::permission_reply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

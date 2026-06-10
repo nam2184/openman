@@ -397,6 +397,563 @@ fn role_from_str(role: &str) -> MessageRole {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::connection::test_support::test_db;
+    use crate::{Project, ProviderConfig, ProviderProtocol, SessionGroup};
+    use chrono::TimeZone;
+    use rusqlite::Connection;
+
+    fn ts(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, hour, min, sec).unwrap()
+    }
+
+    fn sample_project(id: &str, name: &str) -> Project {
+        Project {
+            id: id.to_string(),
+            path: format!("/tmp/{id}"),
+            name: name.to_string(),
+            tech_stack: vec!["rust".to_string()],
+            created_at: ts(2026, 1, 1, 12, 0, 0),
+        }
+    }
+
+    fn sample_session(id: &str, project_id: &str) -> AgentSession {
+        AgentSession {
+            id: id.to_string(),
+            project_id: project_id.to_string(),
+            directory: "/tmp/work".to_string(),
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet-4-20250514".to_string(),
+            group_id: None,
+            created_at: ts(2026, 1, 2, 12, 0, 0),
+        }
+    }
+
+    fn sample_provider_config(name: &str, protocol: ProviderProtocol) -> ProviderConfig {
+        ProviderConfig {
+            name: name.to_string(),
+            model: "claude-sonnet-4-20250514".to_string(),
+            api_key: Some("sk-test".to_string()),
+            base_url: None,
+            protocol,
+            enabled: true,
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // ProjectRepository
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn project_insert_then_find_by_id() {
+        let (db, _guard) = test_db();
+        let project = sample_project("p1", "openman");
+        ProjectRepository::insert(&db, &project).unwrap();
+        let found = ProjectRepository::find_by_id(&db, "p1").unwrap().unwrap();
+        assert_eq!(found.id, "p1");
+        assert_eq!(found.name, "openman");
+        assert_eq!(found.tech_stack, vec!["rust".to_string()]);
+    }
+
+    #[test]
+    fn project_list_returns_all_inserted() {
+        let (db, _guard) = test_db();
+        ProjectRepository::insert(&db, &sample_project("a", "alpha")).unwrap();
+        ProjectRepository::insert(&db, &sample_project("b", "beta")).unwrap();
+        let projects = ProjectRepository::list(&db).unwrap();
+        assert_eq!(projects.len(), 2);
+        let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"alpha"));
+        assert!(names.contains(&"beta"));
+    }
+
+    #[test]
+    fn project_delete_removes_record() {
+        let (db, _guard) = test_db();
+        ProjectRepository::insert(&db, &sample_project("p1", "openman")).unwrap();
+        ProjectRepository::delete(&db, "p1").unwrap();
+        let found = ProjectRepository::find_by_id(&db, "p1").unwrap();
+        assert!(found.is_none());
+        assert!(ProjectRepository::list(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn project_find_by_id_returns_none_for_missing() {
+        let (db, _guard) = test_db();
+        let found = ProjectRepository::find_by_id(&db, "does-not-exist").unwrap();
+        assert!(found.is_none());
+    }
+
+    // ---------------------------------------------------------------------
+    // SessionRepository
+    // ---------------------------------------------------------------------
+
+    fn seed_project(db: &Database) {
+        ProjectRepository::insert(db, &sample_project("p1", "openman")).unwrap();
+    }
+
+    #[test]
+    fn session_insert_then_find_by_id() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        let session = sample_session("s1", "p1");
+        SessionRepository::insert(&db, &session).unwrap();
+        let found = SessionRepository::find_by_id(&db, "s1").unwrap().unwrap();
+        assert_eq!(found.id, "s1");
+        assert_eq!(found.project_id, "p1");
+        assert_eq!(found.provider, "anthropic");
+        assert_eq!(found.model, "claude-sonnet-4-20250514");
+        assert!(found.group_id.is_none());
+    }
+
+    #[test]
+    fn session_list_returns_all_sessions() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        SessionRepository::insert(&db, &sample_session("s2", "p1")).unwrap();
+        let list = SessionRepository::list(&db).unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn session_find_by_project_filters_correctly() {
+        let (db, _guard) = test_db();
+        ProjectRepository::insert(&db, &sample_project("p1", "alpha")).unwrap();
+        ProjectRepository::insert(&db, &sample_project("p2", "beta")).unwrap();
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        SessionRepository::insert(&db, &sample_session("s2", "p2")).unwrap();
+        SessionRepository::insert(&db, &sample_session("s3", "p1")).unwrap();
+
+        let p1 = SessionRepository::find_by_project(&db, "p1").unwrap();
+        let p2 = SessionRepository::find_by_project(&db, "p2").unwrap();
+        assert_eq!(p1.len(), 2);
+        assert_eq!(p2.len(), 1);
+        assert_eq!(p2[0].id, "s2");
+    }
+
+    #[test]
+    fn session_update_provider_changes_fields() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        SessionRepository::update_provider(&db, "s1", "openai", "gpt-4.1").unwrap();
+        let found = SessionRepository::find_by_id(&db, "s1").unwrap().unwrap();
+        assert_eq!(found.provider, "openai");
+        assert_eq!(found.model, "gpt-4.1");
+    }
+
+    #[test]
+    fn session_delete_removes_record() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        SessionRepository::delete(&db, "s1").unwrap();
+        let found = SessionRepository::find_by_id(&db, "s1").unwrap();
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn session_list_populates_group_id() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        // Add to group, then list and check group_id is populated.
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec!["s1".to_string()],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        let list = SessionRepository::list(&db).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].group_id.as_deref(), Some("g1"));
+    }
+
+    // ---------------------------------------------------------------------
+    // SessionGroupRepository
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn session_group_insert_with_sessions_creates_links() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        SessionRepository::insert(&db, &sample_session("s2", "p1")).unwrap();
+
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: Some("Batch 1".to_string()),
+            session_ids: vec!["s1".to_string(), "s2".to_string()],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "g1");
+        assert_eq!(listed[0].name.as_deref(), Some("Batch 1"));
+        assert_eq!(listed[0].session_ids.len(), 2);
+        assert!(listed[0].session_ids.contains(&"s1".to_string()));
+        assert!(listed[0].session_ids.contains(&"s2".to_string()));
+    }
+
+    #[test]
+    fn session_group_list_with_no_sessions_returns_empty_ids() {
+        let (db, _guard) = test_db();
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec![],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].session_ids.is_empty());
+    }
+
+    #[test]
+    fn session_group_rename_updates_name() {
+        let (db, _guard) = test_db();
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec![],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        SessionGroupRepository::rename(&db, "g1", Some("Renamed".to_string())).unwrap();
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        assert_eq!(listed[0].name.as_deref(), Some("Renamed"));
+
+        SessionGroupRepository::rename(&db, "g1", None).unwrap();
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        assert!(listed[0].name.is_none());
+    }
+
+    #[test]
+    fn session_group_add_session_inserts_link() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec![],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        SessionGroupRepository::add_session(&db, "g1", "s1").unwrap();
+
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        assert!(listed[0].session_ids.contains(&"s1".to_string()));
+    }
+
+    #[test]
+    fn session_group_add_session_moves_session_between_groups() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        let g1 = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec!["s1".to_string()],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        let g2 = SessionGroup {
+            id: "g2".to_string(),
+            name: None,
+            session_ids: vec![],
+            created_at: ts(2026, 1, 3, 0, 1, 0),
+        };
+        SessionGroupRepository::insert(&db, &g1).unwrap();
+        SessionGroupRepository::insert(&db, &g2).unwrap();
+
+        // Moving s1 from g1 to g2 should leave g1 empty and g2 with s1.
+        SessionGroupRepository::add_session(&db, "g2", "s1").unwrap();
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        let g1 = listed.iter().find(|g| g.id == "g1").unwrap();
+        let g2 = listed.iter().find(|g| g.id == "g2").unwrap();
+        assert!(g1.session_ids.is_empty());
+        assert_eq!(g2.session_ids, vec!["s1".to_string()]);
+    }
+
+    #[test]
+    fn session_group_remove_session_drops_link() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec!["s1".to_string()],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        SessionGroupRepository::remove_session(&db, "s1").unwrap();
+        let listed = SessionGroupRepository::list(&db).unwrap();
+        assert!(listed[0].session_ids.is_empty());
+    }
+
+    #[test]
+    fn session_group_delete_cascades_to_links() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec!["s1".to_string()],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        SessionGroupRepository::delete(&db, "g1").unwrap();
+
+        // Group is gone.
+        assert!(SessionGroupRepository::list(&db).unwrap().is_empty());
+        // Session still exists.
+        assert!(SessionRepository::find_by_id(&db, "s1").unwrap().is_some());
+    }
+
+    // ---------------------------------------------------------------------
+    // MessageRepository
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn message_insert_then_find_by_session() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        let msg = Message::new("s1".to_string(), MessageRole::User, "Hello".to_string());
+        MessageRepository::insert(&db, &msg).unwrap();
+
+        let found = MessageRepository::find_by_session(&db, "s1").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, msg.id);
+        assert_eq!(found[0].content, "Hello");
+        assert_eq!(found[0].role, MessageRole::User);
+    }
+
+    #[test]
+    fn message_find_by_session_orders_by_timestamp_asc() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        // Insert out of order on purpose.
+        let mut third = Message::new("s1".to_string(), MessageRole::Assistant, "third".to_string());
+        third.timestamp = ts(2026, 1, 1, 13, 0, 0);
+        let mut first = Message::new("s1".to_string(), MessageRole::User, "first".to_string());
+        first.timestamp = ts(2026, 1, 1, 11, 0, 0);
+        let mut second = Message::new("s1".to_string(), MessageRole::User, "second".to_string());
+        second.timestamp = ts(2026, 1, 1, 12, 0, 0);
+
+        MessageRepository::insert(&db, &third).unwrap();
+        MessageRepository::insert(&db, &first).unwrap();
+        MessageRepository::insert(&db, &second).unwrap();
+
+        let found = MessageRepository::find_by_session(&db, "s1").unwrap();
+        let contents: Vec<&str> = found.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(contents, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn message_find_by_session_returns_empty_for_unknown_session() {
+        let (db, _guard) = test_db();
+        let found = MessageRepository::find_by_session(&db, "nope").unwrap();
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn message_delete_by_session_removes_all() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+        let mut m1 = Message::new("s1".to_string(), MessageRole::User, "a".to_string());
+        m1.timestamp = ts(2026, 1, 1, 11, 0, 0);
+        let mut m2 = Message::new("s1".to_string(), MessageRole::Assistant, "b".to_string());
+        m2.timestamp = ts(2026, 1, 1, 12, 0, 0);
+        MessageRepository::insert(&db, &m1).unwrap();
+        MessageRepository::insert(&db, &m2).unwrap();
+        MessageRepository::delete_by_session(&db, "s1").unwrap();
+        assert!(MessageRepository::find_by_session(&db, "s1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn message_role_round_trip_user_assistant_system() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        for (i, role) in [MessageRole::User, MessageRole::Assistant, MessageRole::System]
+            .into_iter()
+            .enumerate()
+        {
+            let mut m = Message::new("s1".to_string(), role.clone(), format!("msg-{i}"));
+            m.timestamp = ts(2026, 1, 1, 10, i as u32, 0);
+            MessageRepository::insert(&db, &m).unwrap();
+        }
+
+        let found = MessageRepository::find_by_session(&db, "s1").unwrap();
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0].role, MessageRole::User);
+        assert_eq!(found[1].role, MessageRole::Assistant);
+        assert_eq!(found[2].role, MessageRole::System);
+    }
+
+    // ---------------------------------------------------------------------
+    // ProviderConfigRepository
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn provider_config_upsert_inserts_new() {
+        let (db, _guard) = test_db();
+        let cfg = sample_provider_config("anthropic", ProviderProtocol::Anthropic);
+        ProviderConfigRepository::upsert(&db, &cfg).unwrap();
+
+        let found = ProviderConfigRepository::find_by_name(&db, "anthropic").unwrap().unwrap();
+        assert_eq!(found.name, "anthropic");
+        assert_eq!(found.protocol, ProviderProtocol::Anthropic);
+        assert!(found.enabled);
+        assert_eq!(found.api_key.as_deref(), Some("sk-test"));
+    }
+
+    #[test]
+    fn provider_config_upsert_replaces_existing() {
+        let (db, _guard) = test_db();
+        let mut cfg = sample_provider_config("anthropic", ProviderProtocol::Anthropic);
+        ProviderConfigRepository::upsert(&db, &cfg).unwrap();
+
+        cfg.model = "claude-opus-4-20250514".to_string();
+        cfg.api_key = Some("sk-rotated".to_string());
+        cfg.enabled = false;
+        ProviderConfigRepository::upsert(&db, &cfg).unwrap();
+
+        let found = ProviderConfigRepository::find_by_name(&db, "anthropic").unwrap().unwrap();
+        assert_eq!(found.model, "claude-opus-4-20250514");
+        assert_eq!(found.api_key.as_deref(), Some("sk-rotated"));
+        assert!(!found.enabled);
+    }
+
+    #[test]
+    fn provider_config_find_by_name_returns_none_for_missing() {
+        let (db, _guard) = test_db();
+        let found = ProviderConfigRepository::find_by_name(&db, "nope").unwrap();
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn provider_config_list_returns_all() {
+        let (db, _guard) = test_db();
+        ProviderConfigRepository::upsert(
+            &db,
+            &sample_provider_config("anthropic", ProviderProtocol::Anthropic),
+        )
+        .unwrap();
+        ProviderConfigRepository::upsert(
+            &db,
+            &sample_provider_config("openai", ProviderProtocol::OpenAI),
+        )
+        .unwrap();
+        ProviderConfigRepository::upsert(
+            &db,
+            &sample_provider_config("minimax", ProviderProtocol::OpenAI),
+        )
+        .unwrap();
+        let list = ProviderConfigRepository::list(&db).unwrap();
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn provider_config_delete_removes_record() {
+        let (db, _guard) = test_db();
+        ProviderConfigRepository::upsert(
+            &db,
+            &sample_provider_config("anthropic", ProviderProtocol::Anthropic),
+        )
+        .unwrap();
+        ProviderConfigRepository::delete(&db, "anthropic").unwrap();
+        let found = ProviderConfigRepository::find_by_name(&db, "anthropic").unwrap();
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn provider_config_protocol_round_trip() {
+        let (db, _guard) = test_db();
+        ProviderConfigRepository::upsert(
+            &db,
+            &sample_provider_config("anthropic", ProviderProtocol::Anthropic),
+        )
+        .unwrap();
+        ProviderConfigRepository::upsert(
+            &db,
+            &sample_provider_config("openai", ProviderProtocol::OpenAI),
+        )
+        .unwrap();
+
+        let anthropic = ProviderConfigRepository::find_by_name(&db, "anthropic")
+            .unwrap()
+            .unwrap();
+        let openai = ProviderConfigRepository::find_by_name(&db, "openai").unwrap().unwrap();
+        assert_eq!(anthropic.protocol, ProviderProtocol::Anthropic);
+        assert_eq!(openai.protocol, ProviderProtocol::OpenAI);
+    }
+
+    // ---------------------------------------------------------------------
+    // Multi-connection sanity check (proves temp-file approach works)
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn second_connection_sees_inserts_from_first() {
+        let (db, guard) = test_db();
+        let path = guard.path().join("test.sqlite");
+        ProjectRepository::insert(&db, &sample_project("p1", "openman")).unwrap();
+
+        // Open a fresh connection to the same file and verify it sees the project.
+        let conn2 = Connection::open(&path).unwrap();
+        let count: i64 = conn2
+            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    // ---------------------------------------------------------------------
+    // Cascade behavior (FK enabled)
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn deleting_session_leaves_group_but_drops_link() {
+        // Sessions don't have a CASCADE on the link table by design (groups persist
+        // even if a session is removed). Verify the current behavior.
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
+
+        let group = SessionGroup {
+            id: "g1".to_string(),
+            name: None,
+            session_ids: vec!["s1".to_string()],
+            created_at: ts(2026, 1, 3, 0, 0, 0),
+        };
+        SessionGroupRepository::insert(&db, &group).unwrap();
+        SessionRepository::delete(&db, "s1").unwrap();
+
+        // Group still exists with empty session list.
+        let groups = SessionGroupRepository::list(&db).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].session_ids.is_empty());
+    }
+}
+
 pub struct ProviderConfigRepository;
 
 impl ProviderConfigRepository {

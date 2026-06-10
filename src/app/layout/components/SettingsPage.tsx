@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, Moon, Sun, Plus, Save, Settings } from "lucide-react";
-import { useEffect, useState, type ChangeEvent } from "react";
-import { getDefaultModel, getModelOptions } from "../../../features/sessions/providerModels";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import {
+  getContextWindow,
+  getDefaultModel,
+  getMaxOutput,
+  getModelOptions,
+  getModelSpec,
+} from "../../../features/sessions/providerModels";
 import type { ProviderConfig } from "../../../features/sessions/sessionStore";
 import { cn } from "../../../lib/utils";
 import { useAppStore } from "../../../features/app/appStore";
@@ -97,6 +103,12 @@ export function SettingsPage() {
   }
 
   const modelOptions = getModelOptions(providerDraft.name, providerDraft.model);
+  const selectedSpec = useMemo(
+    () => getModelSpec(providerDraft.model),
+    [providerDraft.model]
+  );
+  const modelContextWindow = selectedSpec?.context_window ?? getContextWindow(providerDraft.model);
+  const modelMaxOutput = selectedSpec?.max_output ?? getMaxOutput(providerDraft.model);
 
   return (
     <div className="flex h-full flex-col bg-black text-white">
@@ -220,6 +232,20 @@ export function SettingsPage() {
                   placeholder="Optional provider endpoint"
                 />
               </label>
+              <div className="rounded-md border border-[#1f1f1f] bg-[#050505] p-3 text-xs text-[#bdbdbd]">
+                <p className="text-[10px] uppercase tracking-wider text-[#737373]">Context budget (from model spec)</p>
+                <p className="mt-1">
+                  Window: <span className="text-white">{modelContextWindow.toLocaleString()}</span> tokens
+                </p>
+                <p>
+                  Max output: <span className="text-white">{modelMaxOutput.toLocaleString()}</span> tokens
+                </p>
+                {!selectedSpec && providerDraft.model && (
+                  <p className="mt-1 text-[#ff8a3d]">
+                    Model not in registry — using fallback limits.
+                  </p>
+                )}
+              </div>
               <label className="flex items-center gap-2 text-sm text-[#d4d4d4]">
                 <input
                   type="checkbox"

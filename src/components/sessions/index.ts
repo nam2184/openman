@@ -10,3 +10,4 @@ export { SessionList } from "./SessionList";
 export type { SessionListProps } from "./SessionList";
 export { SessionNode } from "./SessionNode";
 export { SessionToolbar } from "./SessionToolbar";
+export { PermissionPromptBar } from "./PermissionPromptBar";

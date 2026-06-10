@@ -3,9 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { SessionCanvas, SessionChat } from "../../components/sessions";
+import { PermissionPromptBar, SessionCanvas, SessionChat } from "../../components/sessions";
 import { Button } from "../../components/ui/button";
 import { useProjectStore } from "../../features/project/projectStore";
+import { usePermissionStore } from "../../features/permissions/permissionStore";
 import { useConversationStore, type AgentStreamEvent } from "../../features/sessions/conversationStore";
 import { useSessionStore } from "../../features/sessions/sessionStore";
 
@@ -30,6 +31,7 @@ export function SessionWorkspace() {
     failStreamingMessage,
     finishStreamingMessage,
   } = useConversationStore();
+  const initializePermissions = usePermissionStore((state) => state.initialize);
   const [isCreating, setIsCreating] = useState(false);
   const [isChatSending, setIsChatSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,20 @@ export function SessionWorkspace() {
       console.error("Failed to initialize sessions:", initError);
     });
   }, [initialize]);
+
+  useEffect(() => {
+    let dispose: (() => void) | undefined;
+    initializePermissions()
+      .then((d) => {
+        dispose = d;
+      })
+      .catch((err) => {
+        console.error("Failed to initialize permission store:", err);
+      });
+    return () => {
+      dispose?.();
+    };
+  }, [initializePermissions]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -222,6 +238,7 @@ export function SessionWorkspace() {
           onClose={closeChat}
         />
       )}
+      <PermissionPromptBar sessionId={chatSessionId} />
     </section>
   );
 }

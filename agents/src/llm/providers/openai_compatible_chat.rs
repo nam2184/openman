@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
-`
+
 use super::{parse_openai_chunk, LlmError, LlmProvider, LlmStream, ToolResultInject};
 use crate::llm::events::LlmEvent;
 use crate::llm::request::{ContentPart, LlmRequest};

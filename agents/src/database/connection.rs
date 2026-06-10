@@ -107,10 +107,81 @@ impl Database {
             [],
         );
 
+        // Enforce foreign keys so cascade behavior is testable.
+        self.conn.execute("PRAGMA foreign_keys = ON", [])
+            .map_err(|e| e.to_string())?;
+
         Ok(())
     }
 
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Creates a fresh initialized database backed by a temp file.
+    /// Returns the database and the temp directory guard (drop on test exit).
+    pub(crate) fn test_db() -> (Database, TempDir) {
+        let dir = TempDir::new().expect("failed to create tempdir");
+        let path = dir.path().join("test.sqlite");
+        let db = Database::new(path).expect("failed to open database");
+        db.init().expect("failed to init database");
+        (db, dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_support::test_db;
+
+    #[test]
+    fn init_is_idempotent() {
+        let (db, _guard) = test_db();
+        // Re-running init should not fail or duplicate tables.
+        db.init().expect("init must be idempotent");
+        // Connection still works.
+        let count: i64 = db
+            .connection()
+            .query_row("SELECT COUNT(*) FROM sqlite_master", [], |row| row.get(0))
+            .unwrap();
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn multiple_connections_to_same_file_share_state() {
+        // Demonstrates that the temp-file approach supports multi-connection access,
+        // which the in-memory `:memory:` approach does not.
+        let (_db, guard) = test_db();
+        let path_a = guard.path().join("test.sqlite");
+        let path_b = path_a.clone();
+
+        let conn_a = Connection::open(&path_a).unwrap();
+        let conn_b = Connection::open(&path_b).unwrap();
+
+        conn_a
+            .execute(
+                "CREATE TABLE IF NOT EXISTS shared (id INTEGER PRIMARY KEY, label TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
+        conn_a
+            .execute("INSERT INTO shared (label) VALUES (?1)", ["from-a"])
+            .unwrap();
+
+        let count: i64 = conn_b
+            .query_row("SELECT COUNT(*) FROM shared", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let label: String = conn_b
+            .query_row("SELECT label FROM shared LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(label, "from-a");
     }
 }
