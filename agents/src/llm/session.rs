@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
@@ -7,10 +8,11 @@ use crate::domain::ToolCall;
 use crate::llm::events::{FinishReason, LlmEvent, ToolResultValue};
 use crate::llm::providers::LlmProvider;
 use crate::llm::request::{ContentPart, LlmMessage, LlmRequest};
+use crate::llm::subagent_registry::SubagentRegistry;
 use crate::permission::{PermissionMode, PermissionService};
 use crate::sessions::conversation::{ConversationMessage, ConversationService};
 use crate::sessions::service::SessionService;
-use crate::tools::{run_tool_with_context, ToolContext};
+use crate::tools::{run_tool_async, run_tool_with_context, ToolContext, ToolRuntime};
 
 const MAX_STEPS: u32 = 25;
 
@@ -27,7 +29,9 @@ pub struct SessionRunner {
     session_service: Arc<SessionService>,
     conversation_service: Arc<ConversationService>,
     providers: Arc<ProviderRegistry>,
+    subagent_registry: Option<Arc<SubagentRegistry>>,
     max_steps: u32,
+    readonly_tools: bool,
     event_sink: Option<SessionEventSink>,
 }
 
@@ -41,13 +45,40 @@ impl SessionRunner {
             session_service,
             conversation_service,
             providers,
+            subagent_registry: None,
             max_steps: MAX_STEPS,
+            readonly_tools: false,
             event_sink: None,
         }
     }
 
     pub fn with_event_sink(mut self, event_sink: SessionEventSink) -> Self {
         self.event_sink = Some(event_sink);
+        self
+    }
+
+    /// Cap the number of LLM turns a single `run` invocation may take.
+    /// Used by the `task` and `ask_peer` tools to bound child sessions.
+    pub fn with_max_turns(mut self, max_turns: u32) -> Self {
+        self.max_steps = max_turns;
+        self
+    }
+
+    /// Restrict this runner's tools to the read-only subset used by
+    /// `ask_peer` children. The runner drops `write`, `edit`,
+    /// `apply_patch`, `shell`, `task`, and `ask_peer` from the tool
+    /// definitions it advertises to the LLM.
+    pub fn with_readonly_tools(mut self, readonly: bool) -> Self {
+        self.readonly_tools = readonly;
+        self
+    }
+
+    /// Wire the SubagentRegistry into the runner so the `task` and
+    /// `ask_peer` tools have access. The agent service calls this on
+    /// its top-level runner; the `task`/`ask_peer` tools build their
+    /// own runners without it.
+    pub fn with_subagent_registry(mut self, registry: Arc<SubagentRegistry>) -> Self {
+        self.subagent_registry = Some(registry);
         self
     }
 
@@ -95,6 +126,32 @@ impl SessionRunner {
             .map_err(|e| SessionError::Conversation(e))?
             .ok_or_else(|| SessionError::SessionNotFound(session_id.to_string()))?;
 
+        // Drain completed sub-agent results into the conversation so the
+        // LLM sees them as ordinary context on this turn.
+        if let Some(registry) = &self.subagent_registry {
+            let completions = registry.take_completions(session_id);
+            for c in completions {
+                let prefix = match c.kind {
+                    crate::llm::subagent_registry::ChildKind::Task => "task_result",
+                    crate::llm::subagent_registry::ChildKind::AskPeer => "peer_answer",
+                };
+                let block = format!(
+                    "<{prefix} id=\"{cid}\" state=\"{st}\">\n{text}\n</{prefix}>",
+                    prefix = prefix,
+                    cid = c.child_session_id,
+                    st = if c.success { "completed" } else { "error" },
+                    text = c.text,
+                );
+                if let Err(e) = self.conversation_service.append_message(
+                    session_id,
+                    crate::MessageRole::User,
+                    block,
+                ) {
+                    tracing::warn!("failed to append child completion: {e}");
+                }
+            }
+        }
+
         let history = self
             .conversation_service
             .get_messages(session_id)
@@ -104,7 +161,11 @@ impl SessionRunner {
 
         let system_prompt = system_prompt_for_session(&session.provider, &[]);
 
-        let tools = default_tool_definitions();
+        let tools = if self.readonly_tools {
+            readonly_tool_definitions()
+        } else {
+            default_tool_definitions()
+        };
 
         let request = LlmRequest::new(&session.model, &session.provider)
             .with_system(system_prompt)
@@ -234,7 +295,24 @@ impl SessionRunner {
                     continue;
                 }
 
-                let result = run_tool_with_context(&tool_call, &ctx);
+                // Dispatch through the async path so the `task` and
+                // `ask_peer` tools can drive child sessions. For
+                // read-only runs (e.g. an `ask_peer` child), the runner
+                // has no ToolRuntime; it falls back to the sync path
+                // inside `run_tool_async` for non-task tools, but task
+                // / ask_peer are unreachable because the tool set is
+                // already filtered.
+                let result = if let Some(registry) = &self.subagent_registry {
+                    let runtime = ToolRuntime {
+                        caller_session_id: session_id.to_string(),
+                        session_service: Arc::clone(&self.session_service),
+                        conversation_service: Arc::clone(&self.conversation_service),
+                        subagent_registry: Arc::clone(registry),
+                    };
+                    run_tool_async(&tool_call, &runtime).await
+                } else {
+                    run_tool_with_context(&tool_call, &ctx)
+                };
 
                 let (result_value, output) = if result.success {
                     let output = result.output.clone();
@@ -417,6 +495,74 @@ fn default_tool_definitions() -> Vec<crate::llm::events::ToolDefinition> {
                 "properties": {
                     "mode": { "type": "string", "enum": ["plan", "build"], "description": "Mode to switch to" }
                 }
+            }),
+        ),
+    ]
+}
+
+/// Read-only tool subset used by `ask_peer` child sessions. Excludes
+/// `write`, `edit`, `apply_patch`, `shell`, `task`, and `ask_peer`
+/// itself. The peer can read files, search, and fetch the web.
+pub fn readonly_tool_definitions() -> Vec<crate::llm::events::ToolDefinition> {
+    vec![
+        crate::llm::events::ToolDefinition::new(
+            "read",
+            "Read a file from disk",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Path to a file to read" },
+                    "offset": { "type": "integer", "minimum": 1 },
+                    "limit": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["path"]
+            }),
+        ),
+        crate::llm::events::ToolDefinition::new(
+            "glob",
+            "Find files by glob pattern",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Root directory" },
+                    "pattern": { "type": "string", "description": "Glob pattern" }
+                },
+                "required": ["path"]
+            }),
+        ),
+        crate::llm::events::ToolDefinition::new(
+            "grep",
+            "Search file contents",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "pattern": { "type": "string" },
+                    "include": { "type": "string" }
+                },
+                "required": ["path", "pattern"]
+            }),
+        ),
+        crate::llm::events::ToolDefinition::new(
+            "webfetch",
+            "Fetch a web URL",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string" }
+                },
+                "required": ["url"]
+            }),
+        ),
+        crate::llm::events::ToolDefinition::new(
+            "websearch",
+            "Search the web",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" }
+                },
+                "required": ["query"]
             }),
         ),
     ]

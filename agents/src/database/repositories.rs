@@ -92,13 +92,14 @@ impl SessionRepository {
     pub fn insert(db: &Database, session: &AgentSession) -> Result<(), String> {
         db.connection()
             .execute(
-                "INSERT INTO agent_sessions (id, project_id, directory, provider, model, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO agent_sessions (id, project_id, directory, provider, model, parent_session_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     session.id,
                     session.project_id,
                     session.directory,
                     session.provider,
                     session.model,
+                    session.parent_session_id,
                     session.created_at.to_rfc3339()
                 ],
             )
@@ -112,6 +113,7 @@ impl SessionRepository {
             .prepare(
                 "
                 SELECT s.id, s.project_id, s.directory, s.provider, s.model, s.created_at,
+                       s.parent_session_id,
                        (SELECT group_id FROM session_group_sessions WHERE session_id = s.id LIMIT 1) AS group_id
                 FROM agent_sessions s
                 ",
@@ -133,6 +135,7 @@ impl SessionRepository {
             .prepare(
                 "
                 SELECT s.id, s.project_id, s.directory, s.provider, s.model, s.created_at,
+                       s.parent_session_id,
                        (SELECT group_id FROM session_group_sessions WHERE session_id = s.id LIMIT 1) AS group_id
                 FROM agent_sessions s
                 WHERE s.id = ?1
@@ -151,6 +154,7 @@ impl SessionRepository {
             .prepare(
                 "
                 SELECT s.id, s.project_id, s.directory, s.provider, s.model, s.created_at,
+                       s.parent_session_id,
                        (SELECT group_id FROM session_group_sessions WHERE session_id = s.id LIMIT 1) AS group_id
                 FROM agent_sessions s
                 WHERE s.project_id = ?1
@@ -164,6 +168,68 @@ impl SessionRepository {
             .filter_map(|row| row.ok())
             .collect();
 
+        Ok(sessions)
+    }
+
+    /// Walk the `parent_session_id` chain starting at `id` and return each
+    /// ancestor's id, nearest-first. Stops at the first row whose
+    /// `parent_session_id` is NULL. Bounded to `max_hops` iterations as a
+    /// safety net against corrupted chains.
+    pub fn ancestors(db: &Database, id: &str, max_hops: usize) -> Result<Vec<String>, String> {
+        Self::ancestors_via(db.connection(), id, max_hops)
+    }
+
+    /// Like `ancestors` but takes a raw `Connection`. The sub-agent
+    /// registry uses this to avoid the cost of opening a new
+    /// `Database` wrapper per check.
+    pub fn ancestors_via(
+        conn: &rusqlite::Connection,
+        id: &str,
+        max_hops: usize,
+    ) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        let mut current = id.to_string();
+        for _ in 0..max_hops {
+            let next: Option<String> = conn
+                .query_row(
+                    "SELECT parent_session_id FROM agent_sessions WHERE id = ?1",
+                    params![&current],
+                    |row| row.get(0),
+                )
+                .ok()
+                .flatten();
+            match next {
+                Some(parent) if !parent.is_empty() => {
+                    out.push(parent.clone());
+                    current = parent;
+                }
+                _ => return Ok(out),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Direct children of a session. Used by the canvas to render sub-agents
+    /// under their parent.
+    pub fn children_of(db: &Database, parent_id: &str) -> Result<Vec<AgentSession>, String> {
+        let mut stmt = db
+            .connection()
+            .prepare(
+                "
+                SELECT s.id, s.project_id, s.directory, s.provider, s.model, s.created_at,
+                       s.parent_session_id,
+                       (SELECT group_id FROM session_group_sessions WHERE session_id = s.id LIMIT 1) AS group_id
+                FROM agent_sessions s
+                WHERE s.parent_session_id = ?1
+                ORDER BY s.created_at ASC
+                ",
+            )
+            .map_err(|e| e.to_string())?;
+        let sessions = stmt
+            .query_map(params![parent_id], |row| session_from_row(row))
+            .map_err(|e| e.to_string())?
+            .filter_map(|row| row.ok())
+            .collect();
         Ok(sessions)
     }
 
@@ -368,13 +434,19 @@ impl MessageRepository {
 
 fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentSession> {
     let created_at: String = row.get(5)?;
+    let parent_session_id: Option<String> = row.get(6)?;
     Ok(AgentSession {
         id: row.get(0)?,
         project_id: row.get(1)?,
         directory: row.get(2)?,
         provider: row.get(3)?,
         model: row.get(4)?,
-        group_id: row.get(6)?,
+        group_id: row.get(7)?,
+        parent_session_id: if parent_session_id.as_deref() == Some("") {
+            None
+        } else {
+            parent_session_id
+        },
         created_at: DateTime::parse_from_rfc3339(&created_at)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
@@ -427,6 +499,7 @@ mod tests {
             provider: "anthropic".to_string(),
             model: "claude-sonnet-4-20250514".to_string(),
             group_id: None,
+            parent_session_id: None,
             created_at: ts(2026, 1, 2, 12, 0, 0),
         }
     }
@@ -951,6 +1024,79 @@ mod tests {
         let groups = SessionGroupRepository::list(&db).unwrap();
         assert_eq!(groups.len(), 1);
         assert!(groups[0].session_ids.is_empty());
+    }
+
+    #[test]
+    fn ancestors_walks_parent_chain() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        let mut grandparent = sample_session("gp", "p1");
+        grandparent.parent_session_id = None;
+        let mut parent = sample_session("p", "p1");
+        parent.parent_session_id = Some("gp".to_string());
+        let mut child = sample_session("c", "p1");
+        child.parent_session_id = Some("p".to_string());
+
+        SessionRepository::insert(&db, &grandparent).unwrap();
+        SessionRepository::insert(&db, &parent).unwrap();
+        SessionRepository::insert(&db, &child).unwrap();
+
+        let ancestors = SessionRepository::ancestors(&db, "c", 8).unwrap();
+        assert_eq!(ancestors, vec!["p".to_string(), "gp".to_string()]);
+    }
+
+    #[test]
+    fn ancestors_stops_at_max_hops() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("a", "p1")).unwrap();
+        SessionRepository::insert(&db, &{
+            let mut s = sample_session("b", "p1");
+            s.parent_session_id = Some("a".to_string());
+            s
+        })
+        .unwrap();
+        SessionRepository::insert(&db, &{
+            let mut s = sample_session("c", "p1");
+            s.parent_session_id = Some("b".to_string());
+            s
+        })
+        .unwrap();
+
+        // c -> b -> a, but max_hops=1 only walks one step.
+        let ancestors = SessionRepository::ancestors(&db, "c", 1).unwrap();
+        assert_eq!(ancestors, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn children_of_returns_only_direct_children() {
+        let (db, _guard) = test_db();
+        seed_project(&db);
+        SessionRepository::insert(&db, &sample_session("p", "p1")).unwrap();
+        SessionRepository::insert(&db, &{
+            let mut s = sample_session("c1", "p1");
+            s.parent_session_id = Some("p".to_string());
+            s
+        })
+        .unwrap();
+        SessionRepository::insert(&db, &{
+            let mut s = sample_session("c2", "p1");
+            s.parent_session_id = Some("p".to_string());
+            s
+        })
+        .unwrap();
+        SessionRepository::insert(&db, &{
+            let mut s = sample_session("grandchild", "p1");
+            s.parent_session_id = Some("c1".to_string());
+            s
+        })
+        .unwrap();
+
+        let kids = SessionRepository::children_of(&db, "p").unwrap();
+        assert_eq!(kids.len(), 2);
+        let ids: Vec<&str> = kids.iter().map(|k| k.id.as_str()).collect();
+        assert!(ids.contains(&"c1"));
+        assert!(ids.contains(&"c2"));
     }
 }
 

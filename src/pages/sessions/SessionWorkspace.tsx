@@ -3,12 +3,12 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PermissionPromptBar, SessionCanvas, SessionChat } from "../../components/sessions";
-import { Button } from "../../components/ui/button";
-import { useProjectStore } from "../../features/project/projectStore";
-import { usePermissionStore } from "../../features/permissions/permissionStore";
-import { useConversationStore, type AgentStreamEvent } from "../../features/sessions/conversationStore";
-import { useSessionStore } from "../../features/sessions/sessionStore";
+import { PermissionPromptBar, SessionCanvas, SessionChat } from "@/components/sessions";
+import { Button } from "@/components/ui/button";
+import { useProjectStore } from "@/features/project/projectStore";
+import { usePermissionStore } from "@/features/permissions/permissionStore";
+import { useConversationStore, type AgentStreamEvent } from "@/features/sessions/conversationStore";
+import { useSessionStore } from "@/features/sessions/sessionStore";
 
 export function SessionWorkspace() {
   const currentProject = useProjectStore((state) => state.currentProject);

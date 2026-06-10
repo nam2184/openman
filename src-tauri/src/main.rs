@@ -51,6 +51,7 @@ fn default_log_filter() -> &'static str {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = dotenvy::dotenv();
     setup_logging();
 
     let stack_detector = StackDetector::new();
@@ -73,6 +74,20 @@ pub fn run() {
     let conversation_service = create_conversation_service(app_data_dir.join("conversations"));
     let provider_service = ProviderService::new(db_path.clone());
 
+    // Initialize the database schema once so the sub-agent registry can
+    // query it via its own connections (it opens per-call). The
+    // ProjectService / SessionService will also call init() on their
+    // own connections when they first access the file; init() is
+    // idempotent.
+    if let Some(parent) = db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(conn) = openman_agents::database::Database::new(db_path.clone()) {
+        if let Err(e) = conn.init() {
+            tracing::warn!("Failed to init shared database: {}", e);
+        }
+    }
+
     let settings_service = SettingsService::new(app_config_dir);
     if let Err(e) = settings_service.load() {
         tracing::warn!("Failed to load settings: {}", e);
@@ -82,6 +97,7 @@ pub fn run() {
         Arc::clone(&session_service),
         Arc::clone(&conversation_service),
         Arc::clone(&provider_service),
+        db_path.clone(),
     );
 
     let permission_map = Arc::new(PermissionMap::new());

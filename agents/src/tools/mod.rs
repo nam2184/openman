@@ -1,4 +1,5 @@
 pub mod apply_patch;
+pub mod ask_peer;
 pub mod edit;
 pub mod external_directory;
 pub mod glob;
@@ -20,12 +21,24 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::llm::SubagentRegistry;
 use crate::permission::{PermissionMode, PermissionService};
 use crate::permission_v2::PermissionService as V2PermissionService;
 use crate::sandbox::{
     DoomLoopDetector, NetworkPolicy, SandboxPolicy, ShellExit, ShellPolicy,
 };
 use crate::{Tool, ToolCall, ToolResult};
+
+/// Runtime context passed to every tool invocation that needs to spawn
+/// sub-sessions or write to the parent's conversation. Held behind an
+/// `Arc` so it's cheap to clone into `tokio::task::spawn`.
+#[derive(Clone)]
+pub struct ToolRuntime {
+    pub caller_session_id: String,
+    pub session_service: Arc<crate::SessionService>,
+    pub conversation_service: Arc<crate::ConversationService>,
+    pub subagent_registry: Arc<SubagentRegistry>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolContext {
@@ -125,6 +138,9 @@ pub fn run_tool_with_context(call: &ToolCall, context: &ToolContext) -> ToolResu
         "grep" => grep::run(call),
         "shell" | "bash" => shell::run(call),
         "task" => task::run(call),
+        "ask_peer" => {
+            failure("ask_peer", "ask_peer requires the async runtime; the agent runner routes this tool to `run_tool_async`".to_string())
+        }
         "skill" => skill::run(call),
         "todo" | "todowrite" => todo::run(call),
         "question" => question::run(call),
@@ -135,6 +151,26 @@ pub fn run_tool_with_context(call: &ToolCall, context: &ToolContext) -> ToolResu
         "external_directory" => external_directory::run(call),
         "invalid" => invalid::run(call),
         _ => invalid::unknown(call),
+    }
+}
+
+/// Async tool dispatch for tools that need the `ToolRuntime` (sub-sessions,
+/// etc.). Falls back to the sync path for everything else. The agent
+/// runner uses this for any tool whose name is `task` or `ask_peer`.
+pub async fn run_tool_async(call: &ToolCall, runtime: &ToolRuntime) -> ToolResult {
+    if let Err(error) = PermissionService::new(PermissionMode::Build).assert_tool_call(call) {
+        return failure(&call.name, error.to_string());
+    }
+
+    match call.name.as_str() {
+        "task" => task::run_async(call, runtime.clone()).await,
+        "ask_peer" => ask_peer::run_async(call, runtime.clone()).await,
+        // Everything else: defer to the sync path. The caller is already
+        // running in an async context, but the underlying tool is sync.
+        other => {
+            let _ = other;
+            run_tool_with_context(call, &ToolContext::default())
+        }
     }
 }
 
@@ -177,7 +213,14 @@ pub fn run_tool_sandboxed(call: &ToolCall, ctx: &SandboxedContext) -> ToolResult
         "shell" | "bash" => shell_sandboxed(call, ctx),
         "webfetch" => webfetch_sandboxed(call, ctx),
         "websearch" => not_implemented_sandboxed("websearch"),
-        "task" => task::run(call),
+        "task" => failure(
+            "task",
+            "task requires the async runtime; the agent runner routes this tool to `run_tool_async`".to_string(),
+        ),
+        "ask_peer" => failure(
+            "ask_peer",
+            "ask_peer requires the async runtime; the agent runner routes this tool to `run_tool_async`".to_string(),
+        ),
         "skill" => skill::run(call),
         "todo" | "todowrite" => todo::run(call),
         "question" => question::run(call),

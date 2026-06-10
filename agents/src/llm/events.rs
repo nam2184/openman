@@ -185,6 +185,40 @@ pub enum LlmEvent {
     ProviderError {
         message: String,
     },
+    /// Emitted when a parent session spawns a child sub-agent (via the
+    /// `task` tool) or asks a peer session a question (via the
+    /// `ask_peer` tool). The UI can use this to render a "consulted
+    /// peer / spawned sub-agent" indicator under the parent's bubble.
+    TaskCall {
+        id: String,
+        child_session_id: String,
+        kind: TaskKind,
+        state: TaskState,
+    },
+    /// Emitted when a child session completes and its result is appended
+    /// to the parent's context. `state` is one of `Completed` or `Error`.
+    TaskResult {
+        id: String,
+        child_session_id: String,
+        kind: TaskKind,
+        state: TaskState,
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskKind {
+    Task,
+    AskPeer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskState {
+    Running,
+    Completed,
+    Error,
 }
 
 impl LlmEvent {

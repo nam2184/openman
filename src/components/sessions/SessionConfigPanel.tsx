@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { GripHorizontal, Plus, Save, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { getDefaultModel, getModelOptions } from "../../features/sessions/providerModels";
-import type { ProviderConfig } from "../../features/sessions/sessionStore";
-import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { getDefaultModel, getModelOptions } from "@/features/sessions/providerModels";
+import type { ProviderConfig } from "@/features/sessions/sessionStore";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface SessionConfigPanelProps {
   onClose: () => void;

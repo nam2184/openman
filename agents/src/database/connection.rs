@@ -28,6 +28,7 @@ impl Database {
                 directory TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
+                parent_session_id TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             );
@@ -73,6 +74,7 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_project ON agent_sessions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_parent ON agent_sessions(parent_session_id);
             CREATE INDEX IF NOT EXISTS idx_session_groups_session ON session_group_sessions(session_id);
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project_id);
@@ -92,6 +94,10 @@ impl Database {
         );
         let _ = self.conn.execute(
             "ALTER TABLE agent_sessions ADD COLUMN model TEXT NOT NULL DEFAULT 'claude-3-5-sonnet-20241022'",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE agent_sessions ADD COLUMN parent_session_id TEXT",
             [],
         );
         let _ = self.conn.execute(

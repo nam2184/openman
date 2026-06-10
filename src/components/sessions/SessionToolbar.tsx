@@ -1,5 +1,5 @@
 import { Plus, RefreshCcw, Settings } from "lucide-react";
-import { Button } from "../ui/button";
+import { Button } from "@/components/ui/button";
 
 interface SessionToolbarProps {
   isCreating: boolean;

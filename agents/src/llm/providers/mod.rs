@@ -91,6 +91,29 @@ pub fn parse_openai_chunk(text: &str) -> Option<LlmEvent> {
     let choice = choices.first()?;
     let delta = choice.get("delta")?;
 
+    let reasoning = delta
+        .get("reasoning_content")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            delta
+                .get("reasoning_details")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|d| d.get("text"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+
+    if let Some(reason) = reasoning {
+        if !reason.is_empty() {
+            return Some(LlmEvent::ReasoningDelta {
+                id: "reasoning".to_string(),
+                text: reason,
+            });
+        }
+    }
+
     if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
         if !text.is_empty() {
             return Some(LlmEvent::TextDelta {

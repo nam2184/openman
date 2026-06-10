@@ -1,8 +1,9 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use openman_agents::{
     llm::providers::{AnthropicProvider, MiniMaxTokenPlanProvider, OpenAiProvider},
-    llm::ContentPart,
+    llm::{ContentPart, SubagentRegistry},
     ConversationService, LlmProvider, MessageRole, ProviderProtocol, ProviderRegistry,
     ProviderService, SessionError, SessionRunEvent, SessionRunner, SessionService,
 };
@@ -36,6 +37,8 @@ pub struct AgentService {
     session_service: Arc<SessionService>,
     conversation_service: Arc<ConversationService>,
     provider_service: Arc<ProviderService>,
+    subagent_registry: Arc<SubagentRegistry>,
+    db_path: PathBuf,
 }
 
 impl AgentService {
@@ -43,16 +46,24 @@ impl AgentService {
         session_service: Arc<SessionService>,
         conversation_service: Arc<ConversationService>,
         provider_service: Arc<ProviderService>,
+        db_path: PathBuf,
     ) -> Arc<Self> {
         let providers = Arc::new(ProviderRegistry::new());
         providers.register_defaults_sync();
+        let subagent_registry = SubagentRegistry::new(db_path.clone());
 
         Arc::new(Self {
             providers,
             session_service,
             conversation_service,
             provider_service,
+            subagent_registry,
+            db_path,
         })
+    }
+
+    pub fn subagent_registry(&self) -> &Arc<SubagentRegistry> {
+        &self.subagent_registry
     }
 
     pub fn providers(&self) -> &Arc<ProviderRegistry> {
@@ -120,6 +131,8 @@ impl AgentService {
         let session_service = Arc::clone(&self.session_service);
         let conversation_service = Arc::clone(&self.conversation_service);
         let providers = Arc::clone(&self.providers);
+        let registry = Arc::clone(&self.subagent_registry);
+        let _ = self.db_path.clone(); // retained for future direct queries
         let app_for_events = app.clone();
         let event_sink = Arc::new(move |event: SessionRunEvent| {
             emit_agent_event(
@@ -134,7 +147,8 @@ impl AgentService {
 
         let run_result = tokio::task::spawn_blocking(move || {
             let runner = SessionRunner::new(session_service, conversation_service, providers)
-                .with_event_sink(event_sink);
+                .with_event_sink(event_sink)
+                .with_subagent_registry(Arc::clone(&registry));
             let rt = tokio::runtime::Handle::current();
             rt.block_on(runner.run(&session_id_clone))
         })

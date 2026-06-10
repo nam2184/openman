@@ -1,8 +1,8 @@
 import { forwardRef } from "react";
 import { Folder, MessageSquare, Clock } from "lucide-react";
-import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export interface SessionCardProps {
   id: string;

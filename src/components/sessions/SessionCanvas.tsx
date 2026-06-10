@@ -8,8 +8,9 @@ import {
   type Node,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { SessionNode } from "./SessionNode";
-import type { AgentSession, SessionGroup } from "../../features/sessions/sessionStore";
+import { SessionNode } from "@/components/sessions/SessionNode";
+import type { AgentSession, SessionGroup } from "@/features/sessions/sessionStore";
+import { useAppStore } from "@/features/app/appStore";
 
 const nodeTypes = { sessionCard: SessionNode };
 
@@ -29,6 +30,7 @@ export function SessionCanvas({
   onSelectSession,
 }: SessionCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const nodeSkin = useAppStore((state) => state.settings.node_skin);
 
   useEffect(() => {
     setNodes((currentNodes) => {
@@ -43,12 +45,13 @@ export function SessionCanvas({
         },
         data: {
           session,
+          skin: nodeSkin,
           onOpenChat: onOpenSessionChat,
           onSelect: onSelectSession,
         },
       }));
     });
-  }, [onOpenSessionChat, onSelectSession, sessions, setNodes]);
+  }, [nodeSkin, onOpenSessionChat, onSelectSession, sessions, setNodes]);
 
   const edges = useMemo<Edge[]>(() => {
     return Array.from(groups.values()).flatMap((group) => {

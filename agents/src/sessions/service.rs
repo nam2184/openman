@@ -24,6 +24,22 @@ impl SessionService {
         provider: String,
         model: String,
     ) -> Result<String, String> {
+        self.create_session_with_parent(project_id, directory, provider, model, None)
+    }
+
+    /// Same as `create_session` but with an optional `parent_session_id` for
+    /// sub-agents / `ask_peer` children. When `parent.is_some()` the
+    /// directory is allowed to differ from the caller's (the `ask_peer`
+    /// flow points the child at the peer's directory) but it still must
+    /// exist.
+    pub fn create_session_with_parent(
+        &self,
+        project_id: String,
+        directory: String,
+        provider: String,
+        model: String,
+        parent: Option<String>,
+    ) -> Result<String, String> {
         let db = self.db()?;
         if ProjectRepository::find_by_id(&db, &project_id)?.is_none() {
             return Err("Project must exist before creating sessions".to_string());
@@ -34,7 +50,8 @@ impl SessionService {
             return Err(format!("Session directory does not exist: {directory}"));
         }
 
-        let session = AgentSession::new(project_id, directory, provider, model);
+        let mut session = AgentSession::new(project_id, directory, provider, model);
+        session.parent_session_id = parent;
         let id = session.id.clone();
         SessionRepository::insert(&db, &session)?;
         Ok(id)
@@ -434,5 +451,61 @@ mod tests {
         );
         log("directory_must_be_a_directory_not_a_file", &format!("{:?}", result));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_session_with_parent_persists_link() {
+        let (service, work, _db) = make_service();
+        seed_project(&service, "p1", "openman");
+        let parent_id = service
+            .create_session(
+                "p1".to_string(),
+                work.path().to_string_lossy().to_string(),
+                "anthropic".to_string(),
+                "claude-sonnet-4-20250514".to_string(),
+            )
+            .unwrap();
+
+        // A different directory for the child (e.g. peer ask_peer use
+        // case).
+        let peer_dir = tempfile::tempdir().unwrap();
+        let child_id = service
+            .create_session_with_parent(
+                "p1".to_string(),
+                peer_dir.path().to_string_lossy().to_string(),
+                "anthropic".to_string(),
+                "claude-sonnet-4-20250514".to_string(),
+                Some(parent_id.clone()),
+            )
+            .expect("create child");
+
+        let child = service.get_session(&child_id).unwrap().unwrap();
+        log(
+            "create_session_with_parent_persists_link",
+            &format!(
+                "child={} parent={:?}",
+                child.id, child.parent_session_id
+            ),
+        );
+        assert_eq!(child.parent_session_id.as_deref(), Some(parent_id.as_str()));
+        assert_eq!(child.directory, peer_dir.path().to_string_lossy().to_string());
+    }
+
+    #[test]
+    fn create_session_with_none_parent_keeps_null() {
+        let (service, work, _db) = make_service();
+        seed_project(&service, "p1", "openman");
+        let id = service
+            .create_session_with_parent(
+                "p1".to_string(),
+                work.path().to_string_lossy().to_string(),
+                "anthropic".to_string(),
+                "claude-sonnet-4-20250514".to_string(),
+                None,
+            )
+            .unwrap();
+
+        let s = service.get_session(&id).unwrap().unwrap();
+        assert!(s.parent_session_id.is_none());
     }
 }

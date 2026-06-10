@@ -12,6 +12,8 @@ pub async fn get_settings(
 #[tauri::command]
 pub async fn save_settings(
     settings_service: State<'_, Arc<SettingsService>>,
+    settings: AppSettings,
 ) -> Result<(), String> {
+    settings_service.update_settings(settings);
     settings_service.save()
 }

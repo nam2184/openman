@@ -5,6 +5,7 @@ export interface ConversationMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning?: string;
   timestamp: string;
 }
 
@@ -101,6 +102,34 @@ function upsertAssistantDraft(
   };
 }
 
+function upsertAssistantReasoning(
+  conversation: ConversationFile,
+  streamingMessageId: string | null,
+  update: (reasoning: string) => string,
+) {
+  const messageId = streamingMessageId ?? createTempMessage("assistant", "").id;
+  const existingIndex = conversation.messages.findIndex((m) => m.id === messageId);
+  if (existingIndex === -1) {
+    return {
+      conversation: {
+        ...conversation,
+        messages: [
+          ...conversation.messages,
+          { ...createTempMessage("assistant", ""), reasoning: update(""), id: messageId },
+        ],
+      },
+      streamingMessageId: messageId,
+    };
+  }
+  const messages = [...conversation.messages];
+  const existing = messages[existingIndex];
+  messages[existingIndex] = {
+    ...existing,
+    reasoning: update(existing.reasoning ?? ""),
+  };
+  return { conversation: { ...conversation, messages }, streamingMessageId: messageId };
+}
+
 export const useConversationStore = create<ConversationState>((set) => ({
   activeConversation: null,
   streamingMessageId: null,
@@ -166,6 +195,15 @@ export const useConversationStore = create<ConversationState>((set) => ({
 
       if (event.event.type === "text_delta") {
         const { conversation, streamingMessageId } = upsertAssistantDraft(
+          state.activeConversation,
+          state.streamingMessageId,
+          (current) => current + (event.event.text ?? ""),
+        );
+        return { activeConversation: conversation, streamingMessageId };
+      }
+
+      if (event.event.type === "reasoning_delta") {
+        const { conversation, streamingMessageId } = upsertAssistantReasoning(
           state.activeConversation,
           state.streamingMessageId,
           (current) => current + (event.event.text ?? ""),

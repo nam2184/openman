@@ -1,9 +1,9 @@
 import { useEffect } from "react";
-import { useProjectStore } from "../../features/project/projectStore";
-import { useAppStore } from "../../features/app/appStore";
-import { SessionWorkspace } from "../../pages/sessions/SessionWorkspace";
-import { ProjectSidebar } from "./components/ProjectSidebar";
-import { SettingsPage } from "./components/SettingsPage";
+import { useProjectStore } from "@/features/project/projectStore";
+import { useAppStore } from "@/features/app/appStore";
+import { SessionWorkspace } from "@/pages/sessions/SessionWorkspace";
+import { ProjectSidebar } from "@/app/layout/components/ProjectSidebar";
+import { SettingsPage } from "@/app/layout/components/SettingsPage";
 
 export function AppShell() {
   const currentProject = useProjectStore((state) => state.currentProject);

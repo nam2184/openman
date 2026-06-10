@@ -1,17 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Check, GripHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { ScrollArea } from "../ui/scroll-area";
-import { cn } from "../../lib/utils";
-import { getDefaultModel, getModelOptions } from "../../features/sessions/providerModels";
-import type { AgentSession, ProviderConfig } from "../../features/sessions/sessionStore";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { getDefaultModel, getModelOptions } from "@/features/sessions/providerModels";
+import type { AgentSession, ProviderConfig } from "@/features/sessions/sessionStore";
 
 export interface SessionChatMessage {
   id?: string;
   role: "user" | "assistant" | "system";
   content: string;
+  reasoning?: string;
   timestamp: string;
 }
 
@@ -288,13 +289,23 @@ export function SessionChat({
                           : "border border-[#2a2a2a] bg-[#111111] text-[#f5f5f5]",
                       )}
                     >
-                      {content}
+                      {message.role === "assistant" && message.reasoning && (
+                        <details className="mb-2 text-xs text-[#737373]" open>
+                          <summary className="cursor-pointer select-none text-[#737373]">
+                            ◌ thinking
+                          </summary>
+                          <pre className="mt-1 whitespace-pre-wrap text-[#737373]">
+                            {message.reasoning}
+                          </pre>
+                        </details>
+                      )}
+                      <div>{content}</div>
                     </div>
                   </div>
                 );
               })
             )}
-            {isSending && (
+            {isSending && messages.every((m) => !m.content && !m.reasoning) && (
               <div className="flex justify-start">
                 <div className="flex items-center gap-2 rounded-none border border-[#1f1f1f] bg-[#0a0a0a] px-4 py-2 text-xs text-[#737373]">
                   <span>◌</span>

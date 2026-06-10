@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AppShell } from "./app/layout/AppShell";
+import { AppShell } from "@/app/layout/AppShell";
 
 export function App() {
   return (

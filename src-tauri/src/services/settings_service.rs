@@ -8,6 +8,7 @@ pub struct AppSettings {
     pub theme: String,
     pub editor_font_size: u32,
     pub editor_tab_size: u32,
+    pub node_skin: String,
 }
 
 impl Default for AppSettings {
@@ -16,6 +17,7 @@ impl Default for AppSettings {
             theme: "dark".to_string(),
             editor_font_size: 14,
             editor_tab_size: 2,
+            node_skin: "default".to_string(),
         }
     }
 }

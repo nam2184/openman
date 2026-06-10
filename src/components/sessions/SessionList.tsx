@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { SessionCard } from "./SessionCard";
-import { ScrollArea } from "../ui/scroll-area";
+import { SessionCard } from "@/components/sessions/SessionCard";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export interface SessionListProps {
   sessions: Array<{

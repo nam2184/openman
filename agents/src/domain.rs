@@ -118,6 +118,7 @@ pub struct AgentSession {
     pub provider: String,
     pub model: String,
     pub group_id: Option<String>,
+    pub parent_session_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -130,6 +131,30 @@ impl AgentSession {
             provider,
             model,
             group_id: None,
+            parent_session_id: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Construct a child session. Children inherit the parent's project, but
+    /// get a fresh id and a `parent_session_id` link. The directory can be
+    /// either the same as the parent (for `ask_peer` / `subagent` calls into
+    /// the parent's own codebase) or a different one (for `subagent`
+    /// worktrees, though we don't enforce worktrees today).
+    pub fn child_of(
+        parent: &AgentSession,
+        directory: String,
+        provider: String,
+        model: String,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            project_id: parent.project_id.clone(),
+            directory,
+            provider,
+            model,
+            group_id: None,
+            parent_session_id: Some(parent.id.clone()),
             created_at: Utc::now(),
         }
     }

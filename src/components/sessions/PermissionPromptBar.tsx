@@ -3,9 +3,9 @@ import { useMemo } from "react";
 import {
   type PermissionPrompt,
   usePermissionStore,
-} from "../../features/permissions/permissionStore";
-import { Button } from "../ui/button";
-import { Card } from "../ui/card";
+} from "@/features/permissions/permissionStore";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 interface PermissionPromptBarProps {
   /** The session whose prompts to show. If null, no bar is rendered. */
