@@ -1,4 +1,4 @@
-use openman_agents::{ProviderConfig, ProviderService};
+use arachne_agents::{ProviderConfig, ProviderService};
 use std::sync::Arc;
 use tauri::State;
 

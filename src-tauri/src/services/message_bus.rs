@@ -1,1 +1,1 @@
-pub use openman_agents::message_bus::MessageBus;
+pub use arachne_agents::message_bus::MessageBus;

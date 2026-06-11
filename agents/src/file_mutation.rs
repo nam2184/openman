@@ -301,7 +301,7 @@ mod tests {
     fn detects_stale_content() {
         let service = FileMutationService::new();
         let path = std::env::temp_dir().join(format!(
-            "openman-stale-{}.txt",
+            "arachne-stale-{}.txt",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

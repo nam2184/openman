@@ -1,4 +1,4 @@
-use openman_agents::permission_v2::{default_ruleset, PermissionService};
+use arachne_agents::permission_v2::{default_ruleset, PermissionService};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

@@ -12,8 +12,9 @@ impl Database {
     }
 
     pub fn init(&self) -> Result<(), String> {
-        self.conn.execute_batch(
-            "
+        self.conn
+            .execute_batch(
+                "
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
                 path TEXT NOT NULL,
@@ -72,14 +73,9 @@ impl Database {
                 protocol TEXT NOT NULL DEFAULT 'openai',
                 enabled INTEGER NOT NULL DEFAULT 1
             );
-
-            CREATE INDEX IF NOT EXISTS idx_sessions_project ON agent_sessions(project_id);
-            CREATE INDEX IF NOT EXISTS idx_sessions_parent ON agent_sessions(parent_session_id);
-            CREATE INDEX IF NOT EXISTS idx_session_groups_session ON session_group_sessions(session_id);
-            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
-            CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project_id);
-            "
-        ).map_err(|e| e.to_string())?;
+            ",
+            )
+            .map_err(|e| e.to_string())?;
 
         let _ = self
             .conn
@@ -114,8 +110,22 @@ impl Database {
         );
 
         // Enforce foreign keys so cascade behavior is testable.
-        self.conn.execute("PRAGMA foreign_keys = ON", [])
+        self.conn
+            .execute("PRAGMA foreign_keys = ON", [])
             .map_err(|e| e.to_string())?;
+
+        // Indexes must be created after the column migrations above so that
+        // pre-existing databases (which lack `parent_session_id`) get the
+        // column added before the index is built.
+        self.conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_sessions_project ON agent_sessions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_sessions_parent ON agent_sessions(parent_session_id);
+            CREATE INDEX IF NOT EXISTS idx_session_groups_session ON session_group_sessions(session_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+            CREATE INDEX IF NOT EXISTS idx_memory_project ON memory(project_id);
+            "
+        ).map_err(|e| e.to_string())?;
 
         Ok(())
     }

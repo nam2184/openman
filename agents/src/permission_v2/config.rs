@@ -40,8 +40,8 @@ impl PermissionConfigFile {
             return Ok(Self::default());
         }
         let raw = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
-        let parsed: Self = serde_json::from_str(&raw)
-            .map_err(|e| format!("parse {path:?}: {e}"))?;
+        let parsed: Self =
+            serde_json::from_str(&raw).map_err(|e| format!("parse {path:?}: {e}"))?;
         Ok(parsed)
     }
 
@@ -50,7 +50,7 @@ impl PermissionConfigFile {
     pub fn load_default(cwd: impl AsRef<Path>) -> Result<Self, String> {
         let cwd = cwd.as_ref();
         let candidates = [
-            cwd.join("openman.json"),
+            cwd.join("arachne.json"),
             cwd.join("opencode.json"),
             home_config_path(),
         ];
@@ -82,7 +82,11 @@ impl PermissionConfigFile {
                     for (permission, value) in map {
                         match value {
                             PermissionRuleValue::Simple(action) => {
-                                rules.push(PermissionRule::new(expand_with(&permission, home), "*", action));
+                                rules.push(PermissionRule::new(
+                                    expand_with(&permission, home),
+                                    "*",
+                                    action,
+                                ));
                             }
                             PermissionRuleValue::Patterned(patterns) => {
                                 for (pattern, action) in patterns {
@@ -102,10 +106,13 @@ impl PermissionConfigFile {
     }
 }
 
-/// Standard home-directory config path: `~/.config/openman/config.json`.
+/// Standard home-directory config path: `~/.config/arachne/config.json`.
 pub fn home_config_path() -> PathBuf {
     if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".config").join("openman").join("config.json");
+        return PathBuf::from(home)
+            .join(".config")
+            .join("arachne")
+            .join("config.json");
     }
     PathBuf::new()
 }
@@ -226,7 +233,10 @@ mod tests {
         match cfg.permission {
             Some(PermissionConfigValue::PerTool(map)) => {
                 assert_eq!(map.len(), 3);
-                assert!(matches!(map.get("bash"), Some(PermissionRuleValue::Simple(PermissionAction::Allow))));
+                assert!(matches!(
+                    map.get("bash"),
+                    Some(PermissionRuleValue::Simple(PermissionAction::Allow))
+                ));
             }
             other => panic!("expected per-tool, got {other:?}"),
         }
@@ -290,11 +300,8 @@ mod tests {
             })),
         };
         let ruleset = cfg.into_ruleset_with(Some(home));
-        let expanded_patterns: Vec<&str> = ruleset
-            .rules
-            .iter()
-            .map(|r| r.pattern.as_str())
-            .collect();
+        let expanded_patterns: Vec<&str> =
+            ruleset.rules.iter().map(|r| r.pattern.as_str()).collect();
         assert!(expanded_patterns.contains(&"/home/test/projects/**"));
     }
 
@@ -361,7 +368,8 @@ mod tests {
         // rules). It doesn't read env vars.
         let dir = tempfile::tempdir().unwrap();
         // Pass a known empty path explicitly.
-        let cfg = PermissionConfigFile::load(dir.path().join("definitely-not-a-config.json")).unwrap();
+        let cfg =
+            PermissionConfigFile::load(dir.path().join("definitely-not-a-config.json")).unwrap();
         assert!(cfg.permission.is_none());
         let _ = dir;
     }

@@ -1,26 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Check, GripHorizontal, X } from "lucide-react";
+import { Check, FolderSearch, GripHorizontal, Search, Terminal, Wrench, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { getDefaultModel, getModelOptions } from "@/features/sessions/providerModels";
+import type { ChatMessagePart } from "@/features/sessions/conversationStore";
 import type { AgentSession, ProviderConfig } from "@/features/sessions/sessionStore";
+import { ThinkBlock } from "@/components/sessions/ThinkBlock";
 
 export interface SessionChatMessage {
   id?: string;
   role: "user" | "assistant" | "system";
   content: string;
   reasoning?: string;
+  parts?: ChatMessagePart[];
   timestamp: string;
 }
+
+export type ChatMode = "plan" | "build";
 
 interface SessionChatProps {
   session: AgentSession;
   messages: SessionChatMessage[];
   isSending: boolean;
-  onSendMessage: (content: string) => void | Promise<void>;
+  streamingMessageId: string | null;
+  onSendMessage: (content: string, mode: ChatMode) => void | Promise<void>;
   onUpdateSessionProvider: (sessionId: string, provider: string, model: string) => Promise<void>;
   onClose: () => void;
 }
@@ -33,6 +39,7 @@ export function SessionChat({
   session,
   messages,
   isSending,
+  streamingMessageId,
   onSendMessage,
   onUpdateSessionProvider,
   onClose,
@@ -45,6 +52,10 @@ export function SessionChat({
   const [configStatus, setConfigStatus] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [isConfigSaving, setIsConfigSaving] = useState(false);
+  // In-memory only; not persisted to settings or anywhere else. The
+  // active mode is sent to the backend on each prompt and injected into
+  // the LLM's context as a synthetic user message.
+  const [mode, setMode] = useState<ChatMode>("plan");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{
@@ -83,7 +94,7 @@ export function SessionChat({
     if (!content || isSending) return;
 
     setInput("");
-    await onSendMessage(content);
+    await onSendMessage(content, mode);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -196,7 +207,7 @@ export function SessionChat({
           </Button>
         </div>
         <div className="border-b border-[#1f1f1f] bg-[#0a0a0a] px-6 py-3">
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(140px,0.8fr)_minmax(220px,1fr)_auto]">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(140px,0.8fr)_minmax(220px,1fr)_auto_auto]">
             <label className="space-y-1">
               <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#737373]">Provider</span>
               {providers.length > 0 ? (
@@ -245,6 +256,42 @@ export function SessionChat({
                 )}
               </select>
             </label>
+            <div className="space-y-1">
+              <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-[#737373]">Mode</span>
+              <div
+                className="flex h-9 w-full rounded-none border border-[#1f1f1f] bg-black text-sm"
+                role="radiogroup"
+                aria-label="Permission mode"
+              >
+                {(["plan", "build"] as const).map((option) => {
+                  const active = mode === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setMode(option)}
+                      className={cn(
+                        "flex-1 select-none px-3 uppercase tracking-[0.18em] text-[11px] transition-colors",
+                        active
+                          ? option === "plan"
+                            ? "bg-[#1a1a1a] text-white"
+                            : "bg-[#2a2a2a] text-white"
+                          : "text-[#737373] hover:text-[#bdbdbd]",
+                      )}
+                      title={
+                        option === "plan"
+                          ? "Read-only: shell, write, edit, apply_patch are blocked"
+                          : "All tools allowed"
+                      }
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <div className="flex items-end gap-2">
               <Button
                 variant="secondary"
@@ -271,7 +318,10 @@ export function SessionChat({
               </div>
             ) : (
               messages.map((message, index) => {
-                const content = formatMessageContent(message.content);
+                const isAssistant = message.role === "assistant";
+                const reasoning = message.reasoning ?? "";
+                const content = message.content ?? "";
+                const parts = message.parts ?? [];
 
                 return (
                   <div
@@ -283,23 +333,24 @@ export function SessionChat({
                   >
                     <div
                       className={cn(
-                        "max-w-[80%] whitespace-pre-wrap break-words rounded-none px-4 py-2 text-sm",
+                        "max-w-[80%] rounded-none px-4 py-2 text-sm",
                         message.role === "user"
-                          ? "bg-white text-black"
+                          ? "whitespace-pre-wrap break-words bg-white text-black"
                           : "border border-[#2a2a2a] bg-[#111111] text-[#f5f5f5]",
                       )}
                     >
-                      {message.role === "assistant" && message.reasoning && (
-                        <details className="mb-2 text-xs text-[#737373]" open>
-                          <summary className="cursor-pointer select-none text-[#737373]">
-                            ◌ thinking
-                          </summary>
-                          <pre className="mt-1 whitespace-pre-wrap text-[#737373]">
-                            {message.reasoning}
-                          </pre>
-                        </details>
+                      {isAssistant && reasoning && (
+                        <ThinkBlock
+                          text={reasoning}
+                          defaultOpen={streamingMessageId === message.id}
+                          className="mb-2"
+                        />
                       )}
-                      <div>{content}</div>
+                      {isAssistant && parts.length > 0 ? (
+                        <AssistantMessageParts parts={parts} fallbackContent={content} />
+                      ) : content ? (
+                        <div className="whitespace-pre-wrap break-words">{content}</div>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -312,6 +363,13 @@ export function SessionChat({
                   <span>◌</span>
                   <span>◌</span>
                   <span>thinking</span>
+                </div>
+              </div>
+            )}
+            {isSending && streamingMessageId && (
+              <div className="flex justify-start">
+                <div className="rounded-none border border-[#2a2a2a] bg-[#111111] px-4 py-2 text-xs text-[#737373]">
+                  <span className="mr-1">◌</span>Thinking
                 </div>
               </div>
             )}
@@ -339,30 +397,166 @@ export function SessionChat({
   );
 }
 
-function formatMessageContent(content: string) {
-  try {
-    const parts = JSON.parse(content) as Array<{ type?: string; text?: string; name?: string }>;
-    if (!Array.isArray(parts)) return content;
-
-    const text = parts
-      .map((part) => {
-        if (part.type === "text" || part.type === "reasoning") {
-          return part.text ?? "";
-        }
-
-        if (part.type === "tool_call") {
-          return part.name ? `Running ${part.name}...` : "Running tool...";
-        }
-
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n");
-
-    return text || content;
-  } catch {
-    return content;
+function AssistantMessageParts({ parts, fallbackContent }: { parts: ChatMessagePart[]; fallbackContent: string }) {
+  const results = new Map<string, Extract<ChatMessagePart, { type: "tool_result" }>>();
+  for (const part of parts) {
+    if (part.type === "tool_result") {
+      results.set(part.id, part);
+    }
   }
+
+  const visibleParts = parts.filter((part) => part.type !== "reasoning" && part.type !== "tool_result");
+  if (visibleParts.length === 0 && fallbackContent) {
+    return <div className="whitespace-pre-wrap break-words">{fallbackContent}</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {visibleParts.map((part, index) => {
+        if (part.type === "text") {
+          return part.text ? (
+            <div key={`text-${index}`} className="whitespace-pre-wrap break-words">
+              {part.text}
+            </div>
+          ) : null;
+        }
+        if (part.type === "tool_call") {
+          return <ToolCallBlock key={part.id || `tool-${index}`} call={part} result={results.get(part.id)} />;
+        }
+        if (part.type === "tool_error") {
+          return <ToolErrorBlock key={part.id || `tool-error-${index}`} error={part} />;
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+function ToolCallBlock({
+  call,
+  result,
+}: {
+  call: Extract<ChatMessagePart, { type: "tool_call" }>;
+  result?: Extract<ChatMessagePart, { type: "tool_result" }>;
+}) {
+  const details = toolDetails(call.name, call.input);
+  const resultSummary = summarizeToolResult(result);
+  const status = resultSummary?.isError ? "failed" : result ? "done" : "running";
+  const Icon = details.icon;
+
+  return (
+    <div className="overflow-hidden rounded-none border border-[#2a2a2a] bg-black font-mono text-xs">
+      <div className="flex items-center justify-between border-b border-[#1f1f1f] bg-[#080808] px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-3.5 w-3.5 shrink-0 text-[#8a8a8a]" />
+          <span className="truncate text-[#f5f5f5]">{call.name}</span>
+          <span className="text-[#4a4a4a]">{details.label}</span>
+        </div>
+        <span
+          className={cn(
+            "ml-3 shrink-0 text-[10px] uppercase tracking-[0.18em]",
+            status === "failed" ? "text-[#ff5f5f]" : status === "done" ? "text-[#7ddc8a]" : "text-[#d6b85a]",
+          )}
+        >
+          {status}
+        </span>
+      </div>
+      <div className="space-y-2 px-3 py-2">
+        <pre className="whitespace-pre-wrap break-words text-[#d4d4d4]">{details.command}</pre>
+        {resultSummary?.text && (
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words border-t border-[#1f1f1f] pt-2 text-[#8a8a8a]">
+            {resultSummary.text}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolErrorBlock({ error }: { error: Extract<ChatMessagePart, { type: "tool_error" }> }) {
+  return (
+    <div className="rounded-none border border-[#3a1f1f] bg-[#120808] px-3 py-2 font-mono text-xs text-[#ff8a8a]">
+      <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-[#ff5f5f]">{error.name ?? "tool"} failed</div>
+      <pre className="whitespace-pre-wrap break-words">{error.message}</pre>
+    </div>
+  );
+}
+
+function toolDetails(name: string, input: unknown): { icon: typeof Terminal; label: string; command: string } {
+  const args = isRecord(input) ? input : {};
+  if (name === "shell") {
+    const command = stringArg(args.command) || "shell";
+    const workdir = stringArg(args.workdir);
+    return {
+      icon: Terminal,
+      label: workdir ? `in ${workdir}` : "command",
+      command: workdir ? `$ ${command}\n# cwd: ${workdir}` : `$ ${command}`,
+    };
+  }
+  if (name === "grep") {
+    const pattern = stringArg(args.pattern) || "<pattern>";
+    const path = stringArg(args.path) || ".";
+    const include = stringArg(args.include);
+    return {
+      icon: Search,
+      label: "search",
+      command: `grep ${quoteArg(pattern)} ${path}${include ? ` --include ${include}` : ""}`,
+    };
+  }
+  if (name === "glob") {
+    const pattern = stringArg(args.pattern) || "**/*";
+    const path = stringArg(args.path) || ".";
+    return {
+      icon: FolderSearch,
+      label: "match files",
+      command: `glob ${quoteArg(pattern)} ${path}`,
+    };
+  }
+  if (name === "read") {
+    return {
+      icon: Wrench,
+      label: "read file",
+      command: stringArg(args.path) || JSON.stringify(input ?? {}, null, 2),
+    };
+  }
+  return {
+    icon: Wrench,
+    label: "tool call",
+    command: JSON.stringify(input ?? {}, null, 2),
+  };
+}
+
+function summarizeToolResult(result?: Extract<ChatMessagePart, { type: "tool_result" }>): { text: string; isError: boolean } | null {
+  if (!result) return null;
+  const value = unwrapResultValue(result.result);
+  if (isRecord(value)) {
+    const error = stringArg(value.error);
+    if (error) return { text: error, isError: true };
+    const text = stringArg(value.text) || stringArg(value.output);
+    if (text) return { text, isError: false };
+  }
+  if (typeof value === "string") return { text: value, isError: false };
+  if (result.output) return { text: result.output, isError: false };
+  return { text: JSON.stringify(value ?? result.result ?? {}, null, 2), isError: false };
+}
+
+function unwrapResultValue(result: unknown): unknown {
+  if (isRecord(result) && "value" in result && typeof result.type === "string") {
+    return result.value;
+  }
+  return result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringArg(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function quoteArg(value: string): string {
+  return /\s/.test(value) ? JSON.stringify(value) : value;
 }
 
 function initialChatPosition() {

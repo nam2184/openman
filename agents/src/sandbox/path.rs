@@ -17,7 +17,12 @@ impl std::fmt::Display for PathContainmentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EscapesRoot { path, root } => {
-                write!(f, "path '{}' escapes root '{}'", path.display(), root.display())
+                write!(
+                    f,
+                    "path '{}' escapes root '{}'",
+                    path.display(),
+                    root.display()
+                )
             }
             Self::ExternalAccess { path } => {
                 write!(f, "path '{}' is outside the project root", path.display())
@@ -64,7 +69,9 @@ impl SandboxPolicy {
     pub fn resolve(&self, path: impl AsRef<Path>) -> Result<PathBuf, PathContainmentError> {
         let path = path.as_ref();
         if path.as_os_str().is_empty() {
-            return Err(PathContainmentError::InvalidPath { path: path.to_path_buf() });
+            return Err(PathContainmentError::InvalidPath {
+                path: path.to_path_buf(),
+            });
         }
 
         // First, normalize the literal path (resolving `..` and `.` syntactically).
@@ -100,7 +107,9 @@ impl SandboxPolicy {
         if path.starts_with(&self.project_root) {
             return true;
         }
-        self.external_roots.iter().any(|root| path.starts_with(root))
+        self.external_roots
+            .iter()
+            .any(|root| path.starts_with(root))
     }
 }
 
@@ -155,7 +164,10 @@ mod tests {
         let escape = dir.path().join("..").join("etc").join("passwd");
         let policy = SandboxPolicy::new(dir.path().to_path_buf());
         let result = policy.resolve(&escape);
-        assert!(matches!(result, Err(PathContainmentError::ExternalAccess { .. })));
+        assert!(matches!(
+            result,
+            Err(PathContainmentError::ExternalAccess { .. })
+        ));
     }
 
     #[test]
@@ -163,7 +175,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let policy = SandboxPolicy::new(dir.path().to_path_buf());
         let result = policy.resolve("/etc/passwd");
-        assert!(matches!(result, Err(PathContainmentError::ExternalAccess { .. })));
+        assert!(matches!(
+            result,
+            Err(PathContainmentError::ExternalAccess { .. })
+        ));
     }
 
     #[test]
@@ -171,7 +186,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let policy = SandboxPolicy::new(dir.path().to_path_buf());
         let result = policy.resolve("");
-        assert!(matches!(result, Err(PathContainmentError::InvalidPath { .. })));
+        assert!(matches!(
+            result,
+            Err(PathContainmentError::InvalidPath { .. })
+        ));
     }
 
     #[test]
@@ -196,7 +214,10 @@ mod tests {
 
         let policy = SandboxPolicy::new(project.path().to_path_buf());
         let result = policy.resolve(&file);
-        assert!(matches!(result, Err(PathContainmentError::ExternalAccess { .. })));
+        assert!(matches!(
+            result,
+            Err(PathContainmentError::ExternalAccess { .. })
+        ));
     }
 
     #[test]

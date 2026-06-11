@@ -10,9 +10,9 @@ use super::events::{FinishReason, LlmEvent, Usage};
 use super::request::{LlmError, LlmMessage, LlmRequest, LlmResponse};
 
 pub mod anthropic;
+pub mod minimax_token_plan;
 pub mod openai;
 mod openai_compatible_chat;
-pub mod minimax_token_plan;
 
 pub use anthropic::AnthropicProvider;
 pub use minimax_token_plan::MiniMaxTokenPlanProvider;

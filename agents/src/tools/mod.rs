@@ -24,9 +24,7 @@ use std::time::Duration;
 use crate::llm::SubagentRegistry;
 use crate::permission::{PermissionMode, PermissionService};
 use crate::permission_v2::PermissionService as V2PermissionService;
-use crate::sandbox::{
-    DoomLoopDetector, NetworkPolicy, SandboxPolicy, ShellExit, ShellPolicy,
-};
+use crate::sandbox::{DoomLoopDetector, NetworkPolicy, SandboxPolicy, ShellExit, ShellPolicy};
 use crate::{Tool, ToolCall, ToolResult};
 
 /// Runtime context passed to every tool invocation that needs to spawn
@@ -69,10 +67,7 @@ pub struct SandboxedContext {
 }
 
 impl SandboxedContext {
-    pub fn new(
-        sandbox: SandboxPolicy,
-        permissions: Arc<V2PermissionService>,
-    ) -> Self {
+    pub fn new(sandbox: SandboxPolicy, permissions: Arc<V2PermissionService>) -> Self {
         let cwd = sandbox.project_root.clone();
         Self {
             sandbox,
@@ -234,7 +229,8 @@ pub fn run_tool_sandboxed(call: &ToolCall, ctx: &SandboxedContext) -> ToolResult
 
 fn pattern_for(tool: &str, call: &ToolCall) -> String {
     let key = match tool {
-        "read" | "read_file" | "write" | "write_file" | "edit" | "apply_patch" | "glob" | "grep" | "search_files" => "path",
+        "read" | "read_file" | "write" | "write_file" | "edit" | "apply_patch" | "glob"
+        | "grep" | "search_files" => "path",
         "shell" | "bash" => "command",
         "webfetch" => "url",
         "websearch" => "query",
@@ -381,7 +377,7 @@ mod tests {
     #[test]
     fn plan_mode_blocks_write_before_file_mutation() {
         let path = std::env::temp_dir().join(format!(
-            "openman-plan-deny-{}.txt",
+            "arachne-plan-deny-{}.txt",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -405,7 +401,7 @@ mod tests {
     #[test]
     fn build_mode_allows_write() {
         let path = std::env::temp_dir().join(format!(
-            "openman-build-allow-{}.txt",
+            "arachne-build-allow-{}.txt",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -452,10 +448,7 @@ mod tests {
         let (ctx, dir) = make_context();
         let file = dir.path().join("a.txt");
         std::fs::write(&file, "hello").unwrap();
-        let result = run_tool_sandboxed(
-            &call("read", &[("path", file.to_str().unwrap())]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("read", &[("path", file.to_str().unwrap())]), &ctx);
         assert!(result.success, "result: {:?}", result);
         assert!(result.output.contains("hello"));
     }
@@ -463,10 +456,7 @@ mod tests {
     #[test]
     fn sandboxed_read_outside_root_rejected() {
         let (ctx, _dir) = make_context();
-        let result = run_tool_sandboxed(
-            &call("read", &[("path", "/etc/passwd")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("read", &[("path", "/etc/passwd")]), &ctx);
         assert!(!result.success);
         assert!(result.error.as_ref().unwrap().contains("outside"));
     }
@@ -475,10 +465,7 @@ mod tests {
     fn sandboxed_read_escapes_via_dotdot() {
         let (ctx, dir) = make_context();
         let escape = format!("{}/../etc/passwd", dir.path().display());
-        let result = run_tool_sandboxed(
-            &call("read", &[("path", escape.as_str())]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("read", &[("path", escape.as_str())]), &ctx);
         assert!(!result.success);
     }
 
@@ -489,10 +476,7 @@ mod tests {
         let result = run_tool_sandboxed(
             &call(
                 "write",
-                &[
-                    ("path", file.to_str().unwrap()),
-                    ("content", "wrote"),
-                ],
+                &[("path", file.to_str().unwrap()), ("content", "wrote")],
             ),
             &ctx,
         );
@@ -518,10 +502,7 @@ mod tests {
         let (ctx, dir) = make_context();
         std::fs::write(dir.path().join("a.txt"), "").unwrap();
         std::fs::write(dir.path().join("b.rs"), "").unwrap();
-        let result = run_tool_sandboxed(
-            &call("glob", &[("pattern", "*.txt")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("glob", &[("pattern", "*.txt")]), &ctx);
         assert!(result.success, "result: {:?}", result);
         assert!(result.output.contains("a.txt"));
     }
@@ -529,10 +510,7 @@ mod tests {
     #[test]
     fn sandboxed_glob_with_dotdot_root_rejected() {
         let (ctx, _dir) = make_context();
-        let result = run_tool_sandboxed(
-            &call("glob", &[("path", "/etc"), ("pattern", "*")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("glob", &[("path", "/etc"), ("pattern", "*")]), &ctx);
         assert!(!result.success);
     }
 
@@ -540,10 +518,7 @@ mod tests {
     fn sandboxed_grep_finds_match() {
         let (ctx, dir) = make_context();
         std::fs::write(dir.path().join("a.txt"), "the quick brown fox").unwrap();
-        let result = run_tool_sandboxed(
-            &call("grep", &[("pattern", "brown")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("grep", &[("pattern", "brown")]), &ctx);
         assert!(result.success);
         assert!(result.output.contains("brown"));
     }
@@ -551,10 +526,7 @@ mod tests {
     #[test]
     fn sandboxed_shell_runs_in_cwd() {
         let (ctx, dir) = make_context();
-        let result = run_tool_sandboxed(
-            &call("shell", &[("command", "pwd")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("shell", &[("command", "pwd")]), &ctx);
         assert!(result.success, "result: {:?}", result);
         // The output should be the canonicalized cwd.
         let canonical = std::fs::canonicalize(dir.path()).unwrap();
@@ -569,10 +541,7 @@ mod tests {
     #[test]
     fn sandboxed_shell_captures_non_zero_exit() {
         let (ctx, _dir) = make_context();
-        let result = run_tool_sandboxed(
-            &call("shell", &[("command", "false")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("shell", &[("command", "false")]), &ctx);
         assert!(!result.success);
     }
 
@@ -592,18 +561,9 @@ mod tests {
     #[test]
     fn sandboxed_different_args_dont_trigger_doom() {
         let (ctx, _dir) = make_context();
-        let result1 = run_tool_sandboxed(
-            &call("shell", &[("command", "ls")]),
-            &ctx,
-        );
-        let result2 = run_tool_sandboxed(
-            &call("shell", &[("command", "pwd")]),
-            &ctx,
-        );
-        let result3 = run_tool_sandboxed(
-            &call("shell", &[("command", "echo hi")]),
-            &ctx,
-        );
+        let result1 = run_tool_sandboxed(&call("shell", &[("command", "ls")]), &ctx);
+        let result2 = run_tool_sandboxed(&call("shell", &[("command", "pwd")]), &ctx);
+        let result3 = run_tool_sandboxed(&call("shell", &[("command", "echo hi")]), &ctx);
         assert!(result1.success);
         assert!(result2.success);
         assert!(result3.success);
@@ -623,10 +583,7 @@ mod tests {
     #[test]
     fn sandboxed_webfetch_allows_public_url() {
         let (ctx, _dir) = make_context();
-        let result = run_tool_sandboxed(
-            &call("webfetch", &[("url", "https://example.com")]),
-            &ctx,
-        );
+        let result = run_tool_sandboxed(&call("webfetch", &[("url", "https://example.com")]), &ctx);
         assert!(result.success, "result: {:?}", result);
     }
 }

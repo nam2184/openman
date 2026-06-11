@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use openman_agents::{
+use arachne_agents::{
     llm::providers::{AnthropicProvider, MiniMaxTokenPlanProvider, OpenAiProvider},
     llm::{ContentPart, SubagentRegistry},
     ConversationService, LlmProvider, MessageRole, ProviderProtocol, ProviderRegistry,
@@ -20,7 +20,7 @@ pub enum AgentUiEvent {
     LlmEvent {
         session_id: String,
         step: u32,
-        event: openman_agents::llm::LlmEvent,
+        event: arachne_agents::llm::LlmEvent,
     },
     Finished {
         session_id: String,
@@ -108,6 +108,7 @@ impl AgentService {
         &self,
         session_id: &str,
         message: String,
+        mode: arachne_agents::permission::PermissionMode,
         app: AppHandle,
     ) -> Result<String, String> {
         emit_agent_event(
@@ -146,9 +147,19 @@ impl AgentService {
         });
 
         let run_result = tokio::task::spawn_blocking(move || {
+            // The runner manages its own per-session doom loop
+            // detector and (optionally) a v2 permission service for
+            // doom-loop user prompts. We don't wire the v2 service
+            // here yet — when the user enables the explicit
+            // doom-loop approval flow, the agent_service will pick up
+            // the configured `PermissionService` and pass it via
+            // `.with_permissions(...)`. Until then, doom loops
+            // surface as hard errors to the LLM, which is the safe
+            // default.
             let runner = SessionRunner::new(session_service, conversation_service, providers)
                 .with_event_sink(event_sink)
-                .with_subagent_registry(Arc::clone(&registry));
+                .with_subagent_registry(Arc::clone(&registry))
+                .with_mode(mode);
             let rt = tokio::runtime::Handle::current();
             rt.block_on(runner.run(&session_id_clone))
         })

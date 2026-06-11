@@ -30,6 +30,7 @@ export function SessionWorkspace() {
     clearConversation,
     failStreamingMessage,
     finishStreamingMessage,
+    streamingMessageId,
   } = useConversationStore();
   const initializePermissions = usePermissionStore((state) => state.initialize);
   const [isCreating, setIsCreating] = useState(false);
@@ -168,7 +169,7 @@ export function SessionWorkspace() {
     });
   }, [addSessionToGroup, createGroup, groups, sessions]);
 
-  const sendChatMessage = useCallback(async (content: string) => {
+  const sendChatMessage = useCallback(async (content: string, mode: "plan" | "build") => {
     if (!chatSessionId || isChatSending) return;
 
     setIsChatSending(true);
@@ -179,6 +180,7 @@ export function SessionWorkspace() {
       await invoke<string>("send_message", {
         sessionId: chatSessionId,
         message: content,
+        mode,
       });
       await loadUiConversation(chatSessionId);
     } catch (chatError) {
@@ -233,6 +235,7 @@ export function SessionWorkspace() {
           session={chatSession}
           messages={chatMessages}
           isSending={isChatSending}
+          streamingMessageId={streamingMessageId}
           onSendMessage={sendChatMessage}
           onUpdateSessionProvider={updateSessionProvider}
           onClose={closeChat}

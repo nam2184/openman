@@ -74,10 +74,7 @@ impl std::error::Error for ShellError {}
 /// regardless of what the LLM asked for. Output is truncated to
 /// `max_output_bytes`. The timeout is enforced via a watchdog thread that
 /// kills the child if it exceeds the budget.
-pub fn run_shell(
-    command: &str,
-    policy: &ShellPolicy,
-) -> Result<ShellOutput, ShellError> {
+pub fn run_shell(command: &str, policy: &ShellPolicy) -> Result<ShellOutput, ShellError> {
     if command.trim().is_empty() {
         return Err(ShellError::Sandbox("empty command".to_string()));
     }
@@ -127,7 +124,10 @@ pub fn run_shell(
         #[cfg(unix)]
         {
             use std::process::Command as Cmd;
-            let _ = Cmd::new("kill").arg("-9").arg(child_pid.to_string()).status();
+            let _ = Cmd::new("kill")
+                .arg("-9")
+                .arg(child_pid.to_string())
+                .status();
         }
         #[cfg(windows)]
         {
@@ -154,15 +154,25 @@ pub fn run_shell(
     // Join the watchdog so it doesn't leak.
     let _ = watchdog.join();
 
-    let stdout = truncate(&String::from_utf8_lossy(&output.stdout), policy.max_output_bytes);
-    let stderr = truncate(&String::from_utf8_lossy(&output.stderr), policy.max_output_bytes);
+    let stdout = truncate(
+        &String::from_utf8_lossy(&output.stdout),
+        policy.max_output_bytes,
+    );
+    let stderr = truncate(
+        &String::from_utf8_lossy(&output.stderr),
+        policy.max_output_bytes,
+    );
 
     let exit = match output.status.code() {
         Some(0) => ShellExit::Success,
         Some(code) => ShellExit::NonZero(code),
         None => ShellExit::Killed,
     };
-    Ok(ShellOutput { exit, stdout, stderr })
+    Ok(ShellOutput {
+        exit,
+        stdout,
+        stderr,
+    })
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -247,7 +257,10 @@ mod tests {
         // The watchdog should kill the child; the result is either NonZero
         // (killed signal) or TimedOut (depending on platform timing).
         assert!(
-            matches!(out.exit, ShellExit::Killed | ShellExit::NonZero(_) | ShellExit::TimedOut),
+            matches!(
+                out.exit,
+                ShellExit::Killed | ShellExit::NonZero(_) | ShellExit::TimedOut
+            ),
             "expected kill/timeout, got {:?}",
             out.exit
         );

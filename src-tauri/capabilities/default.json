@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for OpenMan",
+  "description": "Default capabilities for Arachne",
   "windows": ["main"],
   "permissions": [
     "core:default",

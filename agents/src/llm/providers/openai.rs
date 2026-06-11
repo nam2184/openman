@@ -74,26 +74,36 @@ mod tests {
         let provider = OpenAiProvider::new(Some("test-key".to_string()), None);
         assert_eq!(provider.provider_name(), "openai");
         assert_eq!(provider.model_base_url(), Some("https://api.openai.com/v1"));
-        assert_eq!(provider.chat_completions_url(), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(
+            provider.chat_completions_url(),
+            "https://api.openai.com/v1/chat/completions"
+        );
         assert!(provider.api_key().is_some());
     }
 
     #[tokio::test]
     async fn stream_produces_events_or_http_error() {
         let provider = OpenAiProvider::new(Some("invalid-openai-key".to_string()), None);
-        let request = LlmRequest::new("gpt-4o-mini", "openai").with_message(LlmMessage::user("say hello"));
+        let request =
+            LlmRequest::new("gpt-4o-mini", "openai").with_message(LlmMessage::user("say hello"));
 
         let result = provider.stream(request).await;
 
         if let Ok(stream) = result {
             let events: Vec<_> = stream.events.collect().await;
-            assert!(!events.is_empty(), "stream should produce at least one event");
+            assert!(
+                !events.is_empty(),
+                "stream should produce at least one event"
+            );
             let has_text_or_error = events.iter().any(|e| {
                 matches!(e, LlmEvent::TextDelta { .. })
                     || matches!(e, LlmEvent::ProviderError { .. })
                     || matches!(e, LlmEvent::Finish { .. })
             });
-            assert!(has_text_or_error, "stream should contain text, error, or finish event: {events:?}");
+            assert!(
+                has_text_or_error,
+                "stream should contain text, error, or finish event: {events:?}"
+            );
         } else {
             let err = match result {
                 Err(e) => e,

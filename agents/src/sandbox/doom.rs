@@ -128,7 +128,7 @@ mod tests {
         detector.record("bash", "ls");
         detector.record("bash", "ls");
         detector.record("bash", "pwd"); // breaks the streak
-        // Now two more "ls" should bring it back to 2/3, not 3/3.
+                                        // Now two more "ls" should bring it back to 2/3, not 3/3.
         assert!(!detector.record("bash", "ls"));
         assert!(!detector.record("bash", "ls"));
     }
@@ -139,7 +139,7 @@ mod tests {
         detector.record("bash", "ls");
         detector.record("bash", "ls");
         assert!(detector.record("bash", "ls")); // 3rd triggers
-        // The 3rd call bumped it; 4th is still all-same.
+                                                // The 3rd call bumped it; 4th is still all-same.
         assert!(detector.record("bash", "ls"));
     }
 

@@ -1,4 +1,4 @@
-use openman_agents::{ConversationFile, ConversationMessage, ConversationService, MessageRole};
+use arachne_agents::{ConversationFile, ConversationMessage, ConversationService, MessageRole};
 use std::sync::Arc;
 use tauri::State;
 

@@ -1,5 +1,5 @@
 use crate::services::project_service::ProjectService;
-use openman_agents::Project;
+use arachne_agents::Project;
 use std::path::Path;
 use std::sync::Arc;
 use tauri::State;

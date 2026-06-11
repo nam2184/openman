@@ -98,33 +98,11 @@ impl LlmProvider for AnthropicProvider {
                         let mut content_parts: Vec<serde_json::Value> = Vec::new();
 
                         for part in &msg.content {
-                            match part {
-                                crate::llm::request::ContentPart::Text { text } => {
-                                    content_parts.push(serde_json::json!({
-                                        "type": "text",
-                                        "text": text
-                                    }));
-                                }
-                                crate::llm::request::ContentPart::ToolCall { id, name, input } => {
-                                    content_parts.push(serde_json::json!({
-                                        "type": "tool_use",
-                                        "id": id,
-                                        "name": name,
-                                        "input": input
-                                    }));
-                                }
-                                crate::llm::request::ContentPart::ToolResult {
-                                    id,
-                                    name,
-                                    result,
-                                } => {
-                                    content_parts.push(serde_json::json!({
-                                        "type": "tool_result",
-                                        "tool_use_id": id,
-                                        "content": serde_json::to_string(result).unwrap_or_default()
-                                    }));
-                                }
-                                crate::llm::request::ContentPart::Reasoning { .. } => {}
+                            if let Some(text) = part.as_prompt_text() {
+                                content_parts.push(serde_json::json!({
+                                    "type": "text",
+                                    "text": text
+                                }));
                             }
                         }
 
@@ -175,20 +153,11 @@ impl LlmProvider for AnthropicProvider {
             body["system"] = system_val;
         }
 
-        if !request.tools.is_empty() {
-            let tools = request
-                .tools
-                .iter()
-                .map(|t| {
-                    serde_json::json!({
-                        "name": t.name,
-                        "description": t.description,
-                        "input_schema": t.parameters
-                    })
-                })
-                .collect::<Vec<_>>();
-            body["tools"] = serde_json::json!(tools);
-        }
+        // Note: tool definitions are NOT sent in the request body. The
+        // LLM is told about tools via the system prompt (in XML block
+        // format) and emits tool calls as `<tool_name>...</tool_name>`
+        // blocks in its `text_delta` events. The runner parses those
+        // out of the accumulated text.
 
         let (abort_tx, mut abort_rx) = oneshot::channel();
         let abort_tx = Arc::new(abort_tx);
@@ -220,42 +189,53 @@ impl LlmProvider for AnthropicProvider {
         let stream = async_stream::stream! {
             let mut event_stream = response.bytes_stream();
             let mut line_buffer = String::new();
+            let mut tool_result_rx = tool_result_rx;
 
-            while let Some(chunk) = event_stream.next().await {
-                if matches!(abort_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed)) {
-                    break;
-                }
+            loop {
+                tokio::select! {
+                    biased;
 
-                let Ok(bytes) = chunk else { continue };
-                let text = String::from_utf8_lossy(&bytes);
-
-                for ch in text.chars() {
-                    if ch == '\n' {
-                        let line = line_buffer.trim();
-                        let line_owned = line.to_string();
-                        line_buffer.clear();
-
-                        if line_owned.is_empty() {
-                            continue;
+                    chunk = event_stream.next() => {
+                        let Some(chunk) = chunk else { break };
+                        if matches!(abort_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed)) {
+                            break;
                         }
 
-                        if let Some(event) = parse_anthropic_event(&line_owned) {
-                            yield event;
+                        let Ok(bytes) = chunk else { continue };
+                        let text = String::from_utf8_lossy(&bytes);
+
+                        for ch in text.chars() {
+                            if ch == '\n' {
+                                let line = line_buffer.trim();
+                                let line_owned = line.to_string();
+                                line_buffer.clear();
+
+                                if line_owned.is_empty() {
+                                    continue;
+                                }
+
+                                if let Some(event) = parse_anthropic_event(&line_owned) {
+                                    yield event;
+                                }
+                            } else {
+                                line_buffer.push(ch);
+                            }
                         }
-                    } else {
-                        line_buffer.push(ch);
+                    }
+
+                    inject = tool_result_rx.recv() => {
+                        let Some(inject) = inject else { break };
+                        yield LlmEvent::ToolResult {
+                            id: inject.id,
+                            name: inject.name,
+                            result: crate::llm::events::ToolResultValue::Json { value: inject.result },
+                            output: None,
+                        };
                     }
                 }
             }
 
-            while let Some(inject) = tool_result_rx.recv().await {
-                yield LlmEvent::ToolResult {
-                    id: inject.id,
-                    name: inject.name,
-                    result: crate::llm::events::ToolResultValue::Json { value: inject.result },
-                    output: None,
-                };
-            }
+            drop(tool_result_rx);
         };
 
         Ok(LlmStream {
@@ -298,14 +278,20 @@ mod tests {
 
         if let Ok(stream) = result {
             let events: Vec<_> = stream.events.collect().await;
-            assert!(!events.is_empty(), "stream should produce at least one event");
+            assert!(
+                !events.is_empty(),
+                "stream should produce at least one event"
+            );
             let has_text_or_error = events.iter().any(|e| {
                 matches!(e, LlmEvent::TextDelta { .. })
                     || matches!(e, LlmEvent::ReasoningDelta { .. })
                     || matches!(e, LlmEvent::ProviderError { .. })
                     || matches!(e, LlmEvent::Finish { .. })
             });
-            assert!(has_text_or_error, "stream should contain text, reasoning, error, or finish event: {events:?}");
+            assert!(
+                has_text_or_error,
+                "stream should contain text, reasoning, error, or finish event: {events:?}"
+            );
         } else {
             let err = match result {
                 Err(e) => e,

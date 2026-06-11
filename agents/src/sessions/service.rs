@@ -163,7 +163,10 @@ mod tests {
             "anthropic".to_string(),
             "claude-sonnet-4-20250514".to_string(),
         );
-        log("create_session_requires_existing_project", &format!("{:?}", result));
+        log(
+            "create_session_requires_existing_project",
+            &format!("{:?}", result),
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Project must exist"));
     }
@@ -171,22 +174,27 @@ mod tests {
     #[test]
     fn create_session_requires_existing_directory() {
         let (service, _work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let result = service.create_session(
             "p1".to_string(),
             "/path/that/does/not/exist".to_string(),
             "anthropic".to_string(),
             "claude-sonnet-4-20250514".to_string(),
         );
-        log("create_session_requires_existing_directory", &format!("{:?}", result));
+        log(
+            "create_session_requires_existing_directory",
+            &format!("{:?}", result),
+        );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Session directory does not exist"));
+        assert!(result
+            .unwrap_err()
+            .contains("Session directory does not exist"));
     }
 
     #[test]
     fn create_session_persists_and_returns_id() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id = service
             .create_session(
                 "p1".to_string(),
@@ -196,10 +204,16 @@ mod tests {
             )
             .expect("create_session");
 
-        log("create_session_persists_and_returns_id", &format!("id={}", id));
+        log(
+            "create_session_persists_and_returns_id",
+            &format!("id={}", id),
+        );
         assert!(!id.is_empty());
 
-        let session = service.get_session(&id).expect("get_session").expect("found");
+        let session = service
+            .get_session(&id)
+            .expect("get_session")
+            .expect("found");
         assert_eq!(session.id, id);
         assert_eq!(session.project_id, "p1");
         assert_eq!(session.provider, "anthropic");
@@ -210,7 +224,7 @@ mod tests {
     #[test]
     fn get_all_sessions_lists_them() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id_a = service
             .create_session(
                 "p1".to_string(),
@@ -229,7 +243,10 @@ mod tests {
             .unwrap();
 
         let sessions = service.get_all_sessions().expect("get_all_sessions");
-        log("get_all_sessions_lists_them", &format!("{} sessions", sessions.len()));
+        log(
+            "get_all_sessions_lists_them",
+            &format!("{} sessions", sessions.len()),
+        );
         assert_eq!(sessions.len(), 2);
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
         assert!(ids.contains(&id_a.as_str()));
@@ -239,7 +256,7 @@ mod tests {
     #[test]
     fn delete_session_removes_from_db() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id = service
             .create_session(
                 "p1".to_string(),
@@ -251,14 +268,17 @@ mod tests {
 
         service.delete_session(&id).expect("delete_session");
         let found = service.get_session(&id).expect("get_session");
-        log("delete_session_removes_from_db", &format!("found={:?}", found));
+        log(
+            "delete_session_removes_from_db",
+            &format!("found={:?}", found),
+        );
         assert!(found.is_none());
     }
 
     #[test]
     fn create_group_persists_with_session_links() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id_a = service
             .create_session(
                 "p1".to_string(),
@@ -280,7 +300,10 @@ mod tests {
             .create_group(vec![id_a.clone(), id_b.clone()])
             .expect("create_group");
         let groups = service.get_all_groups().expect("get_all_groups");
-        log("create_group_persists_with_session_links", &format!("{} groups", groups.len()));
+        log(
+            "create_group_persists_with_session_links",
+            &format!("{} groups", groups.len()),
+        );
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].id, group_id);
         assert_eq!(groups[0].session_ids.len(), 2);
@@ -295,7 +318,7 @@ mod tests {
     #[test]
     fn update_session_provider_changes_fields() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id = service
             .create_session(
                 "p1".to_string(),
@@ -308,7 +331,10 @@ mod tests {
             .update_session_provider(&id, "openai", "gpt-4.1")
             .expect("update_session_provider");
         let s = service.get_session(&id).unwrap().unwrap();
-        log("update_session_provider_changes_fields", &format!("{}/{}", s.provider, s.model));
+        log(
+            "update_session_provider_changes_fields",
+            &format!("{}/{}", s.provider, s.model),
+        );
         assert_eq!(s.provider, "openai");
         assert_eq!(s.model, "gpt-4.1");
     }
@@ -316,7 +342,7 @@ mod tests {
     #[test]
     fn rename_group_updates_name() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id = service
             .create_session(
                 "p1".to_string(),
@@ -331,10 +357,15 @@ mod tests {
             .rename_group(&group_id, Some("Plan A".to_string()))
             .expect("rename_group");
         let groups = service.get_all_groups().expect("get_all_groups");
-        log("rename_group_updates_name", &format!("{:?}", groups[0].name));
+        log(
+            "rename_group_updates_name",
+            &format!("{:?}", groups[0].name),
+        );
         assert_eq!(groups[0].name.as_deref(), Some("Plan A"));
 
-        service.rename_group(&group_id, None).expect("rename_group to none");
+        service
+            .rename_group(&group_id, None)
+            .expect("rename_group to none");
         let groups = service.get_all_groups().expect("get_all_groups");
         assert!(groups[0].name.is_none());
     }
@@ -342,7 +373,7 @@ mod tests {
     #[test]
     fn add_session_to_group_links_correctly() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id_a = service
             .create_session(
                 "p1".to_string(),
@@ -360,13 +391,18 @@ mod tests {
             )
             .unwrap();
 
-        let g1 = service.create_group(vec![id_a.clone()]).expect("create_group");
+        let g1 = service
+            .create_group(vec![id_a.clone()])
+            .expect("create_group");
         // Add id_b to the same group.
         service
             .add_session_to_group(&id_b, &g1)
             .expect("add_session_to_group");
         let groups = service.get_all_groups().expect("get_all_groups");
-        log("add_session_to_group_links_correctly", &format!("{:?}", groups[0].session_ids));
+        log(
+            "add_session_to_group_links_correctly",
+            &format!("{:?}", groups[0].session_ids),
+        );
         assert_eq!(groups[0].session_ids.len(), 2);
         assert!(groups[0].session_ids.contains(&id_a));
         assert!(groups[0].session_ids.contains(&id_b));
@@ -375,7 +411,7 @@ mod tests {
     #[test]
     fn remove_session_from_group_unlinks() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id_a = service
             .create_session(
                 "p1".to_string(),
@@ -393,12 +429,17 @@ mod tests {
             )
             .unwrap();
 
-        let g = service.create_group(vec![id_a.clone(), id_b.clone()]).expect("create_group");
+        let g = service
+            .create_group(vec![id_a.clone(), id_b.clone()])
+            .expect("create_group");
         service
             .remove_session_from_group(&id_a)
             .expect("remove_session_from_group");
         let groups = service.get_all_groups().expect("get_all_groups");
-        log("remove_session_from_group_unlinks", &format!("{:?}", groups[0].session_ids));
+        log(
+            "remove_session_from_group_unlinks",
+            &format!("{:?}", groups[0].session_ids),
+        );
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].session_ids, vec![id_b.clone()]);
     }
@@ -407,7 +448,10 @@ mod tests {
     fn get_session_returns_none_for_unknown_id() {
         let (service, _work, _db) = make_service();
         let found = service.get_session("does-not-exist").expect("get_session");
-        log("get_session_returns_none_for_unknown_id", &format!("{:?}", found));
+        log(
+            "get_session_returns_none_for_unknown_id",
+            &format!("{:?}", found),
+        );
         assert!(found.is_none());
     }
 
@@ -415,7 +459,7 @@ mod tests {
     fn multiple_services_can_share_db() {
         // Demonstrates the multi-connection capability with the temp file.
         let (svc_a, work, db_dir) = make_service();
-        seed_project(&svc_a, "p1", "openman");
+        seed_project(&svc_a, "p1", "arachne");
         let id = svc_a
             .create_session(
                 "p1".to_string(),
@@ -429,7 +473,10 @@ mod tests {
         let db_path = db_dir.path().join("sessions.sqlite");
         let svc_b = SessionService::new(db_path);
         let s = svc_b.get_session(&id).unwrap().expect("found via svc_b");
-        log("multiple_services_can_share_db", &format!("id={} provider={}", s.id, s.provider));
+        log(
+            "multiple_services_can_share_db",
+            &format!("id={} provider={}", s.id, s.provider),
+        );
         assert_eq!(s.id, id);
         assert_eq!(s.provider, "anthropic");
     }
@@ -438,7 +485,7 @@ mod tests {
     fn directory_must_be_a_directory_not_a_file() {
         // Edge case: path exists but is a file, not a directory.
         let (service, _work, db_dir) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
 
         let file_path = db_dir.path().join("not-a-dir.txt");
         std::fs::write(&file_path, "hello").unwrap();
@@ -449,14 +496,17 @@ mod tests {
             "anthropic".to_string(),
             "claude-sonnet-4-20250514".to_string(),
         );
-        log("directory_must_be_a_directory_not_a_file", &format!("{:?}", result));
+        log(
+            "directory_must_be_a_directory_not_a_file",
+            &format!("{:?}", result),
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn create_session_with_parent_persists_link() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let parent_id = service
             .create_session(
                 "p1".to_string(),
@@ -482,19 +532,19 @@ mod tests {
         let child = service.get_session(&child_id).unwrap().unwrap();
         log(
             "create_session_with_parent_persists_link",
-            &format!(
-                "child={} parent={:?}",
-                child.id, child.parent_session_id
-            ),
+            &format!("child={} parent={:?}", child.id, child.parent_session_id),
         );
         assert_eq!(child.parent_session_id.as_deref(), Some(parent_id.as_str()));
-        assert_eq!(child.directory, peer_dir.path().to_string_lossy().to_string());
+        assert_eq!(
+            child.directory,
+            peer_dir.path().to_string_lossy().to_string()
+        );
     }
 
     #[test]
     fn create_session_with_none_parent_keeps_null() {
         let (service, work, _db) = make_service();
-        seed_project(&service, "p1", "openman");
+        seed_project(&service, "p1", "arachne");
         let id = service
             .create_session_with_parent(
                 "p1".to_string(),

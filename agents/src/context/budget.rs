@@ -67,7 +67,11 @@ impl ContextBudget {
         BudgetDecision::Continue
     }
 
-    pub fn apply_override(&self, ceiling: &Self, override_settings: &BudgetOverride) -> ClampedBudget {
+    pub fn apply_override(
+        &self,
+        ceiling: &Self,
+        override_settings: &BudgetOverride,
+    ) -> ClampedBudget {
         let mut clamped = false;
         // Start from the model's ceiling as the base. Self is the model budget.
         let mut next = *ceiling;
@@ -143,8 +147,16 @@ mod tests {
             compaction_threshold: 0.8,
         };
         // threshold = 800
-        let d1 = log_decision("input_past_compaction_threshold_returns_compact (800)", &budget, 800);
-        let d2 = log_decision("input_past_compaction_threshold_returns_compact (900)", &budget, 900);
+        let d1 = log_decision(
+            "input_past_compaction_threshold_returns_compact (800)",
+            &budget,
+            800,
+        );
+        let d2 = log_decision(
+            "input_past_compaction_threshold_returns_compact (900)",
+            &budget,
+            900,
+        );
         assert_eq!(d1, BudgetDecision::Compact);
         assert_eq!(d2, BudgetDecision::Compact);
     }
@@ -157,7 +169,11 @@ mod tests {
             compaction_threshold: 0.8,
         };
         // 900 + 200 > 1000 -> Reject
-        let decision = log_decision("input_plus_output_over_limit_returns_reject (900)", &budget, 900);
+        let decision = log_decision(
+            "input_plus_output_over_limit_returns_reject (900)",
+            &budget,
+            900,
+        );
         assert_eq!(decision, BudgetDecision::Reject);
     }
 

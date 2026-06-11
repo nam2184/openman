@@ -81,7 +81,8 @@ pub async fn run_async(call: &ToolCall, runtime: ToolRuntime) -> ToolResult {
     if caller_dir == peer_dir {
         return failure(
             "ask_peer",
-            "ask_peer denied: caller and peer share the same directory; cross-repo calls only".to_string(),
+            "ask_peer denied: caller and peer share the same directory; cross-repo calls only"
+                .to_string(),
         );
     }
 
@@ -97,9 +98,7 @@ pub async fn run_async(call: &ToolCall, runtime: ToolRuntime) -> ToolResult {
             crate::llm::DenyReason::AncestorCycle => {
                 "cannot ask an ancestor session (cycle prevented)".to_string()
             }
-            crate::llm::DenyReason::SelfTarget => {
-                "cannot ask the caller itself".to_string()
-            }
+            crate::llm::DenyReason::SelfTarget => "cannot ask the caller itself".to_string(),
         };
         return failure("ask_peer", msg);
     }
@@ -135,9 +134,10 @@ pub async fn run_async(call: &ToolCall, runtime: ToolRuntime) -> ToolResult {
          tools are disabled for this turn. Answer concisely.]\n\n\
          Peer question: {question}"
     );
-    if let Err(e) = runtime
-        .conversation_service
-        .append_message(&child_id, crate::MessageRole::User, synthetic)
+    if let Err(e) =
+        runtime
+            .conversation_service
+            .append_message(&child_id, crate::MessageRole::User, synthetic)
     {
         return failure(
             "ask_peer",
@@ -212,8 +212,8 @@ async fn run_child_readonly(
 
     match join {
         Ok(Ok(_result)) => {
-            let text = last_assistant_text(&runtime.conversation_service, &child_id)
-                .unwrap_or_default();
+            let text =
+                last_assistant_text(&runtime.conversation_service, &child_id).unwrap_or_default();
             ChildOutcome {
                 success: true,
                 text,

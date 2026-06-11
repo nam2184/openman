@@ -93,6 +93,21 @@ impl ContentPart {
     pub fn reasoning<S: Into<String>>(text: S) -> Self {
         Self::Reasoning { text: text.into() }
     }
+
+    pub fn as_prompt_text(&self) -> Option<String> {
+        match self {
+            Self::Text { text } => Some(text.clone()),
+            Self::ToolCall { id, name, input } => Some(format!(
+                "<tool_call id=\"{id}\" name=\"{name}\">\n<input>{}</input>\n</tool_call>",
+                serde_json::to_string(input).unwrap_or_else(|_| "null".to_string())
+            )),
+            Self::ToolResult { id, name, result } => Some(format!(
+                "<tool_result tool_call_id=\"{id}\" name=\"{name}\">\n{}\n</tool_result>",
+                serde_json::to_string(result).unwrap_or_else(|_| "null".to_string())
+            )),
+            Self::Reasoning { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +116,10 @@ pub struct LlmRequest {
     pub provider: String,
     pub system: Vec<String>,
     pub messages: Vec<LlmMessage>,
+    /// Kept for backward compatibility; providers no longer serialize
+    /// tools into the request body. The runner renders tool
+    /// definitions into the system prompt (XML format) and parses
+    /// tool calls out of the streamed text.
     pub tools: Vec<ToolDefinition>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
@@ -138,6 +157,10 @@ impl LlmRequest {
         self
     }
 
+    /// No-op. Tools are no longer advertised through the request body;
+    /// the runner injects them into the system prompt instead. Kept so
+    /// external callers don't need to be updated; new code should call
+    /// `xml_tools::render_tools_as_prompt` directly.
     pub fn with_tools(mut self, tools: impl IntoIterator<Item = ToolDefinition>) -> Self {
         self.tools.extend(tools);
         self

@@ -5,7 +5,7 @@ pub struct PromptPreset {
     pub content: String,
 }
 
-pub const SYSTEM_PROMPT: &str = "You are OpenMan, a pragmatic coding agent. Prefer small correct changes, inspect the codebase before editing, and keep durable session history separate from UI rendering.";
+pub const SYSTEM_PROMPT: &str = "You are Arachne, a pragmatic coding agent. Prefer small correct changes, inspect the codebase before editing, and keep durable session history separate from UI rendering.";
 
 pub const TITLE_PROMPT: &str = "Generate a short title for this session from the first meaningful user request. Return only the title.";
 

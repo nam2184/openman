@@ -53,7 +53,10 @@ pub struct PermissionService {
 }
 
 impl PermissionService {
-    pub fn new(session_id: impl Into<String>, base_ruleset: PermissionRuleset) -> (Arc<Self>, mpsc::UnboundedReceiver<PermissionRequest>) {
+    pub fn new(
+        session_id: impl Into<String>,
+        base_ruleset: PermissionRuleset,
+    ) -> (Arc<Self>, mpsc::UnboundedReceiver<PermissionRequest>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let service = Arc::new(Self {
             session_id: session_id.into(),
@@ -80,7 +83,12 @@ impl PermissionService {
         let approved = self.approved.read();
         // Order matters: base first, approved later so they win (last-match wins).
         let rule = PermissionRuleset::evaluate_merged(
-            &[&self.base_ruleset, &PermissionRuleset { rules: approved.clone() }],
+            &[
+                &self.base_ruleset,
+                &PermissionRuleset {
+                    rules: approved.clone(),
+                },
+            ],
             &permission,
             &pattern,
         );
@@ -88,7 +96,10 @@ impl PermissionService {
 
         match rule.action {
             PermissionAction::Allow => Ok(CheckOutcome::Allowed),
-            PermissionAction::Deny => Err(CheckError::Denied { permission, pattern }),
+            PermissionAction::Deny => Err(CheckError::Denied {
+                permission,
+                pattern,
+            }),
             PermissionAction::Ask => {
                 let id = request_id.unwrap_or_else(|| RequestId(Uuid::new_v4().to_string()));
                 let req = PermissionRequest {
@@ -110,7 +121,13 @@ impl PermissionService {
         let (reply_tx, reply_rx) = oneshot::channel();
         {
             let mut pending = self.pending.write();
-            pending.insert(id.clone(), PendingEntry { request: request.clone(), reply_tx });
+            pending.insert(
+                id.clone(),
+                PendingEntry {
+                    request: request.clone(),
+                    reply_tx,
+                },
+            );
         }
         let _ = self.request_tx.send(request);
         match reply_rx.blocking_recv() {
@@ -132,7 +149,12 @@ impl PermissionService {
         let approved = self.approved.read();
         // Order matters: base first, approved later so they win (last-match wins).
         let rule = PermissionRuleset::evaluate_merged(
-            &[&self.base_ruleset, &PermissionRuleset { rules: approved.clone() }],
+            &[
+                &self.base_ruleset,
+                &PermissionRuleset {
+                    rules: approved.clone(),
+                },
+            ],
             &permission,
             &pattern,
         );
@@ -140,7 +162,10 @@ impl PermissionService {
 
         match rule.action {
             PermissionAction::Allow => Ok(CheckOutcome::Allowed),
-            PermissionAction::Deny => Err(CheckError::Denied { permission, pattern }),
+            PermissionAction::Deny => Err(CheckError::Denied {
+                permission,
+                pattern,
+            }),
             PermissionAction::Ask => {
                 let id = request_id.unwrap_or_else(|| RequestId(Uuid::new_v4().to_string()));
                 let req = PermissionRequest {
@@ -162,7 +187,13 @@ impl PermissionService {
         let (reply_tx, reply_rx) = oneshot::channel();
         {
             let mut pending = self.pending.write();
-            pending.insert(id.clone(), PendingEntry { request: request.clone(), reply_tx });
+            pending.insert(
+                id.clone(),
+                PendingEntry {
+                    request: request.clone(),
+                    reply_tx,
+                },
+            );
         }
         let _ = self.request_tx.send(request);
         match reply_rx.await {
@@ -209,14 +240,20 @@ impl PermissionService {
                 }
                 Ok(())
             }
-            None => Err(CheckError::NotFound { id: request_id.clone() }),
+            None => Err(CheckError::NotFound {
+                id: request_id.clone(),
+            }),
         }
     }
 
     /// List all currently pending requests. Used by the frontend to render
     /// prompts for sessions that aren't actively asking.
     pub fn list_pending(&self) -> Vec<PermissionRequest> {
-        self.pending.read().values().map(|e| e.request.clone()).collect()
+        self.pending
+            .read()
+            .values()
+            .map(|e| e.request.clone())
+            .collect()
     }
 
     /// Number of approved rules accumulated so far.
@@ -257,7 +294,10 @@ pub enum CheckError {
 impl std::fmt::Display for CheckError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CheckError::Denied { permission, pattern } => {
+            CheckError::Denied {
+                permission,
+                pattern,
+            } => {
                 write!(f, "permission denied: {permission} {pattern}")
             }
             CheckError::Rejected { id } => write!(f, "user rejected request {}", id.0),
@@ -273,7 +313,12 @@ mod tests {
     use super::*;
     use crate::permission_v2::rule::PermissionRule;
 
-    fn make_service(rules: Vec<PermissionRule>) -> (Arc<PermissionService>, mpsc::UnboundedReceiver<PermissionRequest>) {
+    fn make_service(
+        rules: Vec<PermissionRule>,
+    ) -> (
+        Arc<PermissionService>,
+        mpsc::UnboundedReceiver<PermissionRequest>,
+    ) {
         let ruleset = PermissionRuleset { rules };
         PermissionService::new("test-session", ruleset)
     }
@@ -345,7 +390,10 @@ mod tests {
                 request_id: None,
             })
             .expect("first call allowed");
-        println!("[main] first call returned, approved count={}", svc.approved_rule_count());
+        println!(
+            "[main] first call returned, approved count={}",
+            svc.approved_rule_count()
+        );
         assert_eq!(svc.approved_rule_count(), 1);
         println!("[main] calling check (second)");
         let result = svc.check(CheckRequest {
@@ -392,7 +440,10 @@ mod tests {
         // Other pending should have been cleared and rejected.
         let r1 = h1.join().unwrap();
         let r2 = h2.join().unwrap();
-        assert!(r1.is_err() || r2.is_err(), "at least one should have been rejected");
+        assert!(
+            r1.is_err() || r2.is_err(),
+            "at least one should have been rejected"
+        );
         let _ = session;
     }
 

@@ -14,7 +14,10 @@ pub enum PermissionMode {
 
 impl Default for PermissionMode {
     fn default() -> Self {
-        Self::Build
+        // Plan by default — the user has to explicitly switch to build
+        // mode to allow mutating tools. This is the safer starting
+        // point and matches the chat UI's default toggle position.
+        Self::Plan
     }
 }
 

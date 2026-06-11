@@ -1,1 +1,1 @@
-pub use openman_agents::memory::MemoryStore as MemoryService;
+pub use arachne_agents::memory::MemoryStore as MemoryService;

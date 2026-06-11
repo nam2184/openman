@@ -6,8 +6,16 @@ export interface ConversationMessage {
   role: "user" | "assistant" | "system";
   content: string;
   reasoning?: string;
+  parts?: ChatMessagePart[];
   timestamp: string;
 }
+
+export type ChatMessagePart =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
+  | { type: "tool_call"; id: string; name: string; input?: unknown }
+  | { type: "tool_result"; id: string; name?: string; result?: unknown; output?: string | null }
+  | { type: "tool_error"; id?: string; name?: string; message: string };
 
 export interface ConversationFile {
   session_id: string;
@@ -47,6 +55,136 @@ interface ConversationState {
   clearConversation: () => void;
 }
 
+interface ParsedAssistantContent {
+  content: string;
+  reasoning: string;
+  parts: ChatMessagePart[];
+}
+
+interface ContentPart {
+  type?: string;
+  text?: string;
+  name?: string;
+  id?: string;
+  input?: unknown;
+  result?: unknown;
+  output?: string | null;
+}
+
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/**
+ * Splits a stored assistant message (which is a JSON array of
+ * `ContentPart`s) into the visible `content` and the `reasoning` that
+ * the UI renders in `ThinkBlock`.
+ */
+export function parseAssistantParts(raw: string): ParsedAssistantContent {
+  let content = raw;
+  let reasoning = "";
+  let parsedParts: ChatMessagePart[] = raw ? [{ type: "text", text: raw }] : [];
+
+  try {
+    const parts = JSON.parse(raw) as ContentPart[];
+    if (Array.isArray(parts)) {
+      const textChunks: string[] = [];
+      const reasoningChunks: string[] = [];
+      parsedParts = [];
+      for (const part of parts) {
+        if (part.type === "text" && typeof part.text === "string") {
+          textChunks.push(part.text);
+          parsedParts.push({ type: "text", text: part.text });
+        } else if (part.type === "reasoning" && typeof part.text === "string") {
+          reasoningChunks.push(part.text);
+          parsedParts.push({ type: "reasoning", text: part.text });
+        } else if (part.type === "tool_call" && typeof part.name === "string") {
+          parsedParts.push({
+            type: "tool_call",
+            id: part.id ?? `tool-${parsedParts.length}`,
+            name: part.name,
+            input: part.input,
+          });
+        } else if (part.type === "tool_result" && typeof part.id === "string") {
+          parsedParts.push({
+            type: "tool_result",
+            id: part.id,
+            name: part.name,
+            result: part.result,
+            output: part.output,
+          });
+        }
+      }
+      content = textChunks.join("\n").trim();
+      reasoning = reasoningChunks.join("\n").trim();
+    }
+  } catch {
+    // raw was not JSON; treat it as plain text content.
+  }
+
+  return { content, reasoning, parts: parsedParts };
+}
+
+/**
+ * Maintains a running buffer of `text_delta` chunks. As soon as a
+ * complete `<think>...</think>` block is observed, the inner text is
+ * moved to the reasoning stream; anything before/after stays in the
+ * visible content stream. Unterminated `<think>` is held in a buffer
+ * until the close tag arrives.
+ */
+class ThinkSplitter {
+  private buffer = "";
+  private visible = "";
+  private reasoning = "";
+
+  feed(chunk: string): { content: string; reasoning: string } {
+    this.buffer += chunk;
+    this.drainComplete();
+    return this.snapshot();
+  }
+
+  snapshot(): { content: string; reasoning: string } {
+    return { content: this.visible, reasoning: this.reasoning };
+  }
+
+  private drainComplete() {
+    while (this.buffer.length > 0) {
+      const closeIdx = this.buffer.indexOf(THINK_CLOSE);
+      if (closeIdx === -1) {
+        // No close yet. Look for an open: anything before it is visible,
+        // anything from the open onward stays buffered (and will be
+        // flushed as reasoning when/if the close arrives, or as visible
+        // text if no close ever arrives).
+        const openIdx = this.buffer.indexOf(THINK_OPEN);
+        if (openIdx === -1) {
+          this.visible += this.buffer;
+          this.buffer = "";
+        } else if (openIdx > 0) {
+          this.visible += this.buffer.slice(0, openIdx);
+          this.buffer = this.buffer.slice(openIdx);
+        }
+        return;
+      }
+
+      // We have a close. Find the most recent open before it.
+      const openIdx = this.buffer.lastIndexOf(THINK_OPEN, closeIdx);
+      if (openIdx === -1) {
+        // Stray close (no matching open). Treat as visible text.
+        this.visible += this.buffer.slice(0, closeIdx + THINK_CLOSE.length);
+        this.buffer = this.buffer.slice(closeIdx + THINK_CLOSE.length);
+        continue;
+      }
+
+      const before = this.buffer.slice(0, openIdx);
+      const think = this.buffer.slice(openIdx + THINK_OPEN.length, closeIdx);
+      const after = this.buffer.slice(closeIdx + THINK_CLOSE.length);
+
+      if (before) this.visible += before;
+      if (think) this.reasoning += think;
+      this.buffer = after;
+    }
+  }
+}
+
 function createTempMessage(role: ConversationMessage["role"], content: string): ConversationMessage {
   return {
     id: `temp-${role}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -68,80 +206,115 @@ function ensureConversation(sessionId: string, current: ConversationFile | null)
   };
 }
 
-function upsertAssistantDraft(
+/**
+ * Normalizes a freshly-loaded assistant message so the UI sees a flat
+ * `content` / `reasoning` pair rather than the stored JSON array.
+ */
+function normalizeAssistantMessage(message: ConversationMessage): ConversationMessage {
+  if (message.role !== "assistant") return message;
+  const parsed = parseAssistantParts(message.content);
+  return {
+    ...message,
+    content: parsed.content,
+    reasoning: parsed.reasoning || message.reasoning,
+    parts: parsed.parts,
+  };
+}
+
+function appendPart(parts: ChatMessagePart[] | undefined, part: ChatMessagePart): ChatMessagePart[] {
+  const current = parts ?? [];
+  if ((part.type === "tool_call" || part.type === "tool_result") && part.id) {
+    const existingIndex = current.findIndex((existing) =>
+      existing.type === part.type && "id" in existing && existing.id === part.id,
+    );
+    if (existingIndex !== -1) {
+      return current.map((existing, index) => (index === existingIndex ? part : existing));
+    }
+  }
+  return [...current, part];
+}
+
+function setTextPart(parts: ChatMessagePart[] | undefined, text: string): ChatMessagePart[] | undefined {
+  if (!text) return parts;
+  const current = parts ?? [];
+  const textIndex = current.findIndex((part) => part.type === "text");
+  if (textIndex === -1) {
+    return [{ type: "text", text }, ...current];
+  }
+  return current.map((part, index) => (index === textIndex ? { type: "text", text } : part));
+}
+
+function normalizeConversation(conv: ConversationFile): ConversationFile {
+  return {
+    ...conv,
+    messages: conv.messages.map(normalizeAssistantMessage),
+  };
+}
+
+function findOrCreateStreamingMessage(
   conversation: ConversationFile,
   streamingMessageId: string | null,
-  update: (content: string) => string,
-) {
+): { messageId: string; index: number; isNew: boolean; existing?: ConversationMessage } {
   const messageId = streamingMessageId ?? createTempMessage("assistant", "").id;
-  const existingIndex = conversation.messages.findIndex((message) => message.id === messageId);
-
-  if (existingIndex === -1) {
-    return {
-      conversation: {
-        ...conversation,
-        messages: [...conversation.messages, { ...createTempMessage("assistant", update("")), id: messageId }],
-      },
-      streamingMessageId: messageId,
-    };
+  const index = conversation.messages.findIndex((m) => m.id === messageId);
+  if (index === -1) {
+    return { messageId, index: -1, isNew: true };
   }
+  return { messageId, index, isNew: false, existing: conversation.messages[index] };
+}
 
-  const messages = [...conversation.messages];
-  const existing = messages[existingIndex];
-  messages[existingIndex] = {
-    ...existing,
-    content: update(existing.content),
-  };
+function upsertAssistant(
+  conversation: ConversationFile,
+  streamingMessageId: string | null,
+  update: (current: ConversationMessage) => ConversationMessage,
+): { conversation: ConversationFile; streamingMessageId: string } {
+  const { messageId, index, isNew, existing } = findOrCreateStreamingMessage(
+    conversation,
+    streamingMessageId,
+  );
+
+  const base: ConversationMessage = isNew
+    ? { ...createTempMessage("assistant", ""), id: messageId }
+    : existing!;
+  const updated = update(base);
+
+  const messages = isNew
+    ? [...conversation.messages, updated]
+    : conversation.messages.map((m, i) => (i === index ? updated : m));
 
   return {
-    conversation: {
-      ...conversation,
-      messages,
-    },
+    conversation: { ...conversation, messages },
     streamingMessageId: messageId,
   };
 }
 
-function upsertAssistantReasoning(
-  conversation: ConversationFile,
-  streamingMessageId: string | null,
-  update: (reasoning: string) => string,
-) {
-  const messageId = streamingMessageId ?? createTempMessage("assistant", "").id;
-  const existingIndex = conversation.messages.findIndex((m) => m.id === messageId);
-  if (existingIndex === -1) {
-    return {
-      conversation: {
-        ...conversation,
-        messages: [
-          ...conversation.messages,
-          { ...createTempMessage("assistant", ""), reasoning: update(""), id: messageId },
-        ],
-      },
-      streamingMessageId: messageId,
-    };
+const streamingSplitters = new Map<string, ThinkSplitter>();
+
+function getOrCreateSplitter(messageId: string): ThinkSplitter {
+  let splitter = streamingSplitters.get(messageId);
+  if (!splitter) {
+    splitter = new ThinkSplitter();
+    streamingSplitters.set(messageId, splitter);
   }
-  const messages = [...conversation.messages];
-  const existing = messages[existingIndex];
-  messages[existingIndex] = {
-    ...existing,
-    reasoning: update(existing.reasoning ?? ""),
-  };
-  return { conversation: { ...conversation, messages }, streamingMessageId: messageId };
+  return splitter;
 }
 
-export const useConversationStore = create<ConversationState>((set) => ({
+function clearSplitter(messageId: string | null) {
+  if (messageId) streamingSplitters.delete(messageId);
+}
+
+export const useConversationStore = create<ConversationState>((set, get) => ({
   activeConversation: null,
   streamingMessageId: null,
 
   loadConversation: async (sessionId) => {
     const conv = await invoke<ConversationFile>("get_ai_conversation", { sessionId });
-    set({ activeConversation: conv, streamingMessageId: null });
+    set({ activeConversation: normalizeConversation(conv), streamingMessageId: null });
   },
 
   loadUiConversation: async (sessionId) => {
     const conv = await invoke<ConversationFile>("get_ui_conversation", { sessionId });
-    set({ activeConversation: conv, streamingMessageId: null });
+    set({ activeConversation: normalizeConversation(conv), streamingMessageId: null });
   },
 
   appendMessage: async (sessionId, role, content) => {
@@ -151,7 +324,7 @@ export const useConversationStore = create<ConversationState>((set) => ({
       content,
     });
     const conv = await invoke<ConversationFile>("get_ui_conversation", { sessionId });
-    set({ activeConversation: conv, streamingMessageId: null });
+    set({ activeConversation: normalizeConversation(conv), streamingMessageId: null });
     return messageId;
   },
 
@@ -163,11 +336,7 @@ export const useConversationStore = create<ConversationState>((set) => ({
       return {
         activeConversation: {
           ...conversation,
-          messages: [
-            ...conversation.messages,
-            createTempMessage("user", content),
-            assistant,
-          ],
+          messages: [...conversation.messages, createTempMessage("user", content), assistant],
         },
         streamingMessageId: assistant.id,
       };
@@ -181,10 +350,13 @@ export const useConversationStore = create<ConversationState>((set) => ({
       }
 
       if (event.type === "error") {
-        const { conversation, streamingMessageId } = upsertAssistantDraft(
+        const { conversation, streamingMessageId } = upsertAssistant(
           state.activeConversation,
           state.streamingMessageId,
-          (current) => appendErrorToDraft(current, event.message),
+          (current) => ({
+            ...current,
+            content: appendErrorToDraft(current.content, event.message),
+          }),
         );
         return { activeConversation: conversation, streamingMessageId };
       }
@@ -194,46 +366,99 @@ export const useConversationStore = create<ConversationState>((set) => ({
       }
 
       if (event.event.type === "text_delta") {
-        const { conversation, streamingMessageId } = upsertAssistantDraft(
+        const chunk = event.event.text ?? "";
+        const { conversation, streamingMessageId } = upsertAssistant(
           state.activeConversation,
           state.streamingMessageId,
-          (current) => current + (event.event.text ?? ""),
+          (current) => {
+            const splitter = getOrCreateSplitter(current.id);
+            const snapshot = splitter.feed(chunk);
+            return {
+              ...current,
+              content: snapshot.content,
+              reasoning: snapshot.reasoning,
+              parts: setTextPart(current.parts, snapshot.content),
+            };
+          },
         );
         return { activeConversation: conversation, streamingMessageId };
       }
 
       if (event.event.type === "reasoning_delta") {
-        const { conversation, streamingMessageId } = upsertAssistantReasoning(
+        const { conversation, streamingMessageId } = upsertAssistant(
           state.activeConversation,
           state.streamingMessageId,
-          (current) => current + (event.event.text ?? ""),
+          (current) => ({
+            ...current,
+            reasoning: (current.reasoning ?? "") + (event.event.text ?? ""),
+            parts: appendPart(current.parts, { type: "reasoning", text: event.event.text ?? "" }),
+          }),
         );
         return { activeConversation: conversation, streamingMessageId };
       }
 
       if (event.event.type === "tool_call") {
-        const { conversation, streamingMessageId } = upsertAssistantDraft(
+        const { conversation, streamingMessageId } = upsertAssistant(
           state.activeConversation,
           state.streamingMessageId,
-          (current) => current || `Running ${event.event.name ?? "tool"}...`,
+          (current) => ({
+            ...current,
+            parts: appendPart(current.parts, {
+              type: "tool_call",
+              id: event.event.id ?? `tool-${Date.now()}`,
+              name: event.event.name ?? "tool",
+              input: event.event.input,
+            }),
+          }),
+        );
+        return { activeConversation: conversation, streamingMessageId };
+      }
+
+      if (event.event.type === "tool_result") {
+        const { conversation, streamingMessageId } = upsertAssistant(
+          state.activeConversation,
+          state.streamingMessageId,
+          (current) => ({
+            ...current,
+            parts: appendPart(current.parts, {
+              type: "tool_result",
+              id: event.event.id ?? `tool-result-${Date.now()}`,
+              name: event.event.name,
+              result: event.event.result,
+              output: event.event.output,
+            }),
+          }),
         );
         return { activeConversation: conversation, streamingMessageId };
       }
 
       if (event.event.type === "tool_error") {
-        const { conversation, streamingMessageId } = upsertAssistantDraft(
+        const errorLine = `${event.event.name ?? "tool"} failed: ${event.event.message ?? "Unknown error"}`;
+        const { conversation, streamingMessageId } = upsertAssistant(
           state.activeConversation,
           state.streamingMessageId,
-          (current) => `${current}\n${event.event.name ?? "tool"} failed: ${event.event.message ?? "Unknown error"}`.trim(),
+          (current) => ({
+            ...current,
+            content: current.content,
+            parts: appendPart(current.parts, {
+              type: "tool_error",
+              id: event.event.id,
+              name: event.event.name,
+              message: event.event.message ?? errorLine,
+            }),
+          }),
         );
         return { activeConversation: conversation, streamingMessageId };
       }
 
       if (event.event.type === "provider_error") {
-        const { conversation, streamingMessageId } = upsertAssistantDraft(
+        const { conversation, streamingMessageId } = upsertAssistant(
           state.activeConversation,
           state.streamingMessageId,
-          (current) => appendErrorToDraft(current, event.event.message ?? "Unknown LLM provider error"),
+          (current) => ({
+            ...current,
+            content: appendErrorToDraft(current.content, event.event.message ?? "Unknown LLM provider error"),
+          }),
         );
         return { activeConversation: conversation, streamingMessageId };
       }
@@ -245,29 +470,31 @@ export const useConversationStore = create<ConversationState>((set) => ({
   failStreamingMessage: (sessionId, message) => {
     set((state) => {
       const conversation = ensureConversation(sessionId, state.activeConversation);
-      const { conversation: updatedConversation, streamingMessageId } = upsertAssistantDraft(
+      const { conversation: updatedConversation, streamingMessageId } = upsertAssistant(
         conversation,
         state.streamingMessageId,
-        (current) => appendErrorToDraft(current, message),
+        (current) => ({
+          ...current,
+          content: appendErrorToDraft(current.content, message),
+        }),
       );
       return { activeConversation: updatedConversation, streamingMessageId };
     });
   },
 
   finishStreamingMessage: (sessionId) => {
-    set((state) => {
-      if (state.activeConversation?.session_id !== sessionId) {
-        return state;
-      }
-
-      return { streamingMessageId: null };
-    });
+    const state = get();
+    if (state.activeConversation?.session_id !== sessionId) {
+      return;
+    }
+    clearSplitter(state.streamingMessageId);
+    set({ streamingMessageId: null });
   },
 
   compactConversation: async (sessionId, summary) => {
     await invoke("compact_conversation", { sessionId, summary });
     const conv = await invoke<ConversationFile>("get_ai_conversation", { sessionId });
-    set({ activeConversation: conv, streamingMessageId: null });
+    set({ activeConversation: normalizeConversation(conv), streamingMessageId: null });
   },
 
   clearConversation: () => set({ activeConversation: null, streamingMessageId: null }),

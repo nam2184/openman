@@ -5,11 +5,20 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
+    #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default = "default_editor_font_size")]
     pub editor_font_size: u32,
+    #[serde(default = "default_editor_tab_size")]
     pub editor_tab_size: u32,
+    #[serde(default = "default_node_skin")]
     pub node_skin: String,
 }
+
+fn default_theme() -> String { "dark".to_string() }
+fn default_editor_font_size() -> u32 { 14 }
+fn default_editor_tab_size() -> u32 { 2 }
+fn default_node_skin() -> String { "default".to_string() }
 
 impl Default for AppSettings {
     fn default() -> Self {

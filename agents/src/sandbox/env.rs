@@ -92,7 +92,10 @@ mod tests {
             (k("AWS_SECRET_ACCESS_KEY"), k("xxx")),
         ];
         let scrubbed = scrub_env(&env);
-        let names: Vec<String> = scrubbed.iter().map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        let names: Vec<String> = scrubbed
+            .iter()
+            .map(|(k, _)| k.to_string_lossy().to_string())
+            .collect();
         assert_eq!(names, vec!["PATH".to_string()]);
     }
 

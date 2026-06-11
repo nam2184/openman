@@ -106,7 +106,7 @@ fn snapshots_equal(previous: &[ContextSnapshot], next: &[ContextSnapshot]) -> bo
 mod tests {
     use std::sync::Arc;
 
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use super::*;
     use crate::context::budget::{BudgetDecision, ContextBudget};
@@ -136,7 +136,11 @@ mod tests {
 
     fn log_prompt(label: &str, prompt: &str) {
         println!("\n========== {} ==========", label);
-        println!("rendered prompt ({} chars, ~{} tokens):", prompt.len(), estimate_tokens(prompt));
+        println!(
+            "rendered prompt ({} chars, ~{} tokens):",
+            prompt.len(),
+            estimate_tokens(prompt)
+        );
         println!("----------------------------------------");
         println!("{}", prompt);
         println!("----------------------------------------");
@@ -145,7 +149,12 @@ mod tests {
     fn log_snapshots(label: &str, snapshots: &[ContextSnapshot]) {
         println!("\n[snapshots: {}] ({} entries)", label, snapshots.len());
         for snap in snapshots {
-            println!("  - key={}  value={}  rendered_len={}", snap.key, snap.value, snap.rendered.len());
+            println!(
+                "  - key={}  value={}  rendered_len={}",
+                snap.key,
+                snap.value,
+                snap.rendered.len()
+            );
         }
     }
 
@@ -159,8 +168,8 @@ mod tests {
             }))
             .with_source(Arc::new(StaticSource {
                 key: "project".to_string(),
-                value: json!({"name": "openman"}),
-                rendered: "Project: openman".to_string(),
+                value: json!({"name": "arachne"}),
+                rendered: "Project: arachne".to_string(),
             }));
 
         let (prompt, snapshots) = ctx.initialize().unwrap();
@@ -168,7 +177,7 @@ mod tests {
         log_prompt("initialize_renders_aggregated_prompt", &prompt);
         log_snapshots("initialize_renders_aggregated_prompt", &snapshots);
 
-        assert_eq!(prompt, "OS: linux\n\nProject: openman");
+        assert_eq!(prompt, "OS: linux\n\nProject: arachne");
         assert_eq!(snapshots.len(), 2);
         assert_eq!(snapshots[0].key, "env");
         assert_eq!(snapshots[1].key, "project");
@@ -232,9 +241,15 @@ mod tests {
         let (initial_prompt, snapshots) = ctx.initialize().unwrap();
         let result = ctx.reconcile(&snapshots).unwrap();
 
-        log_prompt("reconcile_returns_none_when_unchanged (initial)", &initial_prompt);
+        log_prompt(
+            "reconcile_returns_none_when_unchanged (initial)",
+            &initial_prompt,
+        );
         log_snapshots("reconcile_returns_none_when_unchanged", &snapshots);
-        println!("[reconcile result when unchanged] -> {:?} (expected None)", result);
+        println!(
+            "[reconcile result when unchanged] -> {:?} (expected None)",
+            result
+        );
 
         assert!(result.is_none());
     }
@@ -262,9 +277,15 @@ mod tests {
         let result = ctx.reconcile(&snapshots).unwrap();
         let (prompt, new_snapshots) = result.expect("expected change to be detected");
 
-        log_prompt("reconcile_returns_new_prompt_when_changed (before)", &initial_prompt);
+        log_prompt(
+            "reconcile_returns_new_prompt_when_changed (before)",
+            &initial_prompt,
+        );
         log_prompt("reconcile_returns_new_prompt_when_changed (after)", &prompt);
-        log_snapshots("reconcile_returns_new_prompt_when_changed (new)", &new_snapshots);
+        log_snapshots(
+            "reconcile_returns_new_prompt_when_changed (new)",
+            &new_snapshots,
+        );
 
         assert_eq!(prompt, "value-v2");
         assert_eq!(new_snapshots.len(), 1);
@@ -289,7 +310,10 @@ mod tests {
         let (prompt, _) = ctx.initialize().unwrap();
 
         log_prompt("add_source_appends_new_entry", &prompt);
-        println!("[sources in order] -> {:?}", ctx.sources().iter().map(|s| s.key()).collect::<Vec<_>>());
+        println!(
+            "[sources in order] -> {:?}",
+            ctx.sources().iter().map(|s| s.key()).collect::<Vec<_>>()
+        );
 
         assert_eq!(prompt, "alpha\n\nbeta");
     }
@@ -359,7 +383,10 @@ mod tests {
         let (prompt, _) = ctx.initialize().unwrap();
 
         log_prompt("remove_source_drops_entry", &prompt);
-        println!("[removed source key='a'] remaining keys -> {:?}", ctx.sources().iter().map(|s| s.key()).collect::<Vec<_>>());
+        println!(
+            "[removed source key='a'] remaining keys -> {:?}",
+            ctx.sources().iter().map(|s| s.key()).collect::<Vec<_>>()
+        );
 
         assert_eq!(prompt, "beta");
     }
@@ -368,18 +395,20 @@ mod tests {
     fn remove_source_returns_none_when_missing() {
         let mut ctx = SystemContext::new();
         let result = ctx.remove_source("nope");
-        println!("\n[remove_source_returns_none_when_missing] result: {:?} (expected None)", result.as_ref().map(|s| s.key().to_string()));
+        println!(
+            "\n[remove_source_returns_none_when_missing] result: {:?} (expected None)",
+            result.as_ref().map(|s| s.key().to_string())
+        );
         assert!(result.is_none());
     }
 
     #[test]
     fn aggregated_prompt_within_budget_allows_continue() {
-        let ctx = SystemContext::new()
-            .with_source(Arc::new(StaticSource {
-                key: "short".to_string(),
-                value: json!({}),
-                rendered: "just a few words".to_string(),
-            }));
+        let ctx = SystemContext::new().with_source(Arc::new(StaticSource {
+            key: "short".to_string(),
+            value: json!({}),
+            rendered: "just a few words".to_string(),
+        }));
 
         let (prompt, _) = ctx.initialize().unwrap();
         let budget = ContextBudget::default();
@@ -387,8 +416,13 @@ mod tests {
         let decision = budget.decide(tokens);
 
         log_prompt("aggregated_prompt_within_budget_allows_continue", &prompt);
-        println!("[tokens={}, budget max_input={}, max_output={}, threshold={}%]",
-            tokens, budget.max_input_tokens, budget.max_output_tokens, (budget.compaction_threshold * 100.0) as usize);
+        println!(
+            "[tokens={}, budget max_input={}, max_output={}, threshold={}%]",
+            tokens,
+            budget.max_input_tokens,
+            budget.max_output_tokens,
+            (budget.compaction_threshold * 100.0) as usize
+        );
         println!("[decision: {:?} (expected Continue)]", decision);
 
         assert_eq!(decision, BudgetDecision::Continue);
@@ -409,10 +443,18 @@ mod tests {
         let decision = budget.decide(tokens);
 
         println!("\n[aggregated_prompt_over_compaction_threshold_triggers_compact]");
-        println!("[prompt length: {} chars, ~{} tokens (first 80 chars shown)]", prompt.len(), tokens);
+        println!(
+            "[prompt length: {} chars, ~{} tokens (first 80 chars shown)]",
+            prompt.len(),
+            tokens
+        );
         println!("[preview] {}", &prompt[..80.min(prompt.len())]);
-        println!("[budget: max_input={}, max_output={}, threshold={}%]",
-            budget.max_input_tokens, budget.max_output_tokens, (budget.compaction_threshold * 100.0) as usize);
+        println!(
+            "[budget: max_input={}, max_output={}, threshold={}%]",
+            budget.max_input_tokens,
+            budget.max_output_tokens,
+            (budget.compaction_threshold * 100.0) as usize
+        );
         println!("[decision: {:?} (expected Compact)]", decision);
 
         assert_eq!(decision, BudgetDecision::Compact);
@@ -433,10 +475,18 @@ mod tests {
         let decision = budget.decide(tokens);
 
         println!("\n[aggregated_prompt_plus_output_exceeding_budget_is_rejected]");
-        println!("[prompt length: {} chars, ~{} tokens (first 80 chars shown)]", prompt.len(), tokens);
+        println!(
+            "[prompt length: {} chars, ~{} tokens (first 80 chars shown)]",
+            prompt.len(),
+            tokens
+        );
         println!("[preview] {}", &prompt[..80.min(prompt.len())]);
-        println!("[budget: max_input={}, max_output={}, threshold={}%]",
-            budget.max_input_tokens, budget.max_output_tokens, (budget.compaction_threshold * 100.0) as usize);
+        println!(
+            "[budget: max_input={}, max_output={}, threshold={}%]",
+            budget.max_input_tokens,
+            budget.max_output_tokens,
+            (budget.compaction_threshold * 100.0) as usize
+        );
         println!("[decision: {:?} (expected Reject)]", decision);
 
         assert_eq!(decision, BudgetDecision::Reject);

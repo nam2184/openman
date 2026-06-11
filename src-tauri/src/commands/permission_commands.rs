@@ -1,5 +1,5 @@
 use crate::services::permission_map::PermissionMap;
-use openman_agents::permission_v2::{PermissionRequest, RequestId, UserReply};
+use arachne_agents::permission_v2::{PermissionRequest, RequestId, UserReply};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 

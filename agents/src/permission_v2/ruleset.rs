@@ -44,7 +44,11 @@ impl PermissionRuleset {
     /// Evaluate across multiple rulesets. Rules are merged into a single list
     /// in the order given (so later rulesets' rules take precedence), and the
     /// standard last-matching-wins evaluation runs against the merged list.
-    pub fn evaluate_merged(rulesets: &[&PermissionRuleset], permission: &str, pattern: &str) -> PermissionRule {
+    pub fn evaluate_merged(
+        rulesets: &[&PermissionRuleset],
+        permission: &str,
+        pattern: &str,
+    ) -> PermissionRule {
         let merged: Vec<PermissionRule> = rulesets
             .iter()
             .flat_map(|rs| rs.rules.iter().cloned())
@@ -57,11 +61,28 @@ impl PermissionRuleset {
     pub fn disabled_tools(&self) -> std::collections::HashSet<String> {
         let edits = ["edit", "write", "apply_patch"];
         let mut disabled = std::collections::HashSet::new();
-        for tool in ["read", "glob", "grep", "edit", "write", "apply_patch", "bash", "webfetch", "websearch", "lsp", "skill", "todowrite", "question"] {
+        for tool in [
+            "read",
+            "glob",
+            "grep",
+            "edit",
+            "write",
+            "apply_patch",
+            "bash",
+            "webfetch",
+            "websearch",
+            "lsp",
+            "skill",
+            "todowrite",
+            "question",
+        ] {
             let permission = if edits.contains(&tool) { "edit" } else { tool };
-            if let Some(rule) = self.rules.iter().rev().find(|r| {
-                wildcard_match(&r.permission, permission) && r.pattern == "*"
-            }) {
+            if let Some(rule) = self
+                .rules
+                .iter()
+                .rev()
+                .find(|r| wildcard_match(&r.permission, permission) && r.pattern == "*")
+            {
                 if rule.action == PermissionAction::Deny {
                     disabled.insert(tool.to_string());
                 }

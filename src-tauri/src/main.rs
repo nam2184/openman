@@ -5,7 +5,7 @@ mod commands;
 mod error;
 mod services;
 
-use openman_agents::{
+use arachne_agents::{
     create_conversation_service, ConversationService, ProviderService, SessionService,
 };
 use services::agent_service::AgentService;
@@ -41,9 +41,9 @@ fn setup_logging() {
 
 fn default_log_filter() -> &'static str {
     if cfg!(feature = "dev-logs") || cfg!(debug_assertions) {
-        "openman=debug,tauri=info"
+        "arachne=debug,tauri=info"
     } else if cfg!(feature = "prod-logs") {
-        "openman=info"
+        "arachne=info"
     } else {
         "warn"
     }
@@ -58,7 +58,7 @@ pub fn run() {
     let memory_service = MemoryService::new();
     let watcher_service = WatcherService::new();
 
-    let app_dirs = directories::ProjectDirs::from("ai", "openman", "openman");
+    let app_dirs = directories::ProjectDirs::from("ai", "arachne", "arachne");
     let app_data_dir = app_dirs
         .as_ref()
         .map(|d| d.data_dir().to_path_buf())
@@ -68,7 +68,7 @@ pub fn run() {
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| std::env::current_dir().unwrap().join("config"));
 
-    let db_path = app_data_dir.join("openman.sqlite");
+    let db_path = app_data_dir.join("arachne.sqlite");
     let project_service = ProjectService::new(db_path.clone(), Arc::clone(&stack_detector));
     let session_service = SessionService::new(db_path.clone());
     let conversation_service = create_conversation_service(app_data_dir.join("conversations"));
@@ -82,7 +82,7 @@ pub fn run() {
     if let Some(parent) = db_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(conn) = openman_agents::database::Database::new(db_path.clone()) {
+    if let Ok(conn) = arachne_agents::database::Database::new(db_path.clone()) {
         if let Err(e) = conn.init() {
             tracing::warn!("Failed to init shared database: {}", e);
         }

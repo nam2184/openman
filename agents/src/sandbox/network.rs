@@ -30,20 +30,20 @@ impl std::error::Error for NetworkPolicyError {}
 pub fn blocked_ranges() -> Vec<IpNet> {
     [
         // IPv4
-        "127.0.0.0/8",      // loopback
-        "10.0.0.0/8",       // private
-        "172.16.0.0/12",    // private
-        "192.168.0.0/16",   // private
-        "169.254.0.0/16",   // link-local
-        "100.64.0.0/10",    // carrier-grade NAT
-        "0.0.0.0/8",        // "this network"
-        "224.0.0.0/4",      // multicast
-        "240.0.0.0/4",      // reserved
+        "127.0.0.0/8",    // loopback
+        "10.0.0.0/8",     // private
+        "172.16.0.0/12",  // private
+        "192.168.0.0/16", // private
+        "169.254.0.0/16", // link-local
+        "100.64.0.0/10",  // carrier-grade NAT
+        "0.0.0.0/8",      // "this network"
+        "224.0.0.0/4",    // multicast
+        "240.0.0.0/4",    // reserved
         // IPv6
-        "::1/128",          // loopback
-        "fc00::/7",         // ULA
-        "fe80::/10",        // link-local
-        "::ffff:0:0/96",    // IPv4-mapped (let the IPv4 rules apply)
+        "::1/128",       // loopback
+        "fc00::/7",      // ULA
+        "fe80::/10",     // link-local
+        "::ffff:0:0/96", // IPv4-mapped (let the IPv4 rules apply)
     ]
     .iter()
     .filter_map(|s| s.parse::<IpNet>().ok())
@@ -80,7 +80,8 @@ impl NetworkPolicy {
         if !self.ssrf_guard {
             return parse_host(url).ok_or_else(|| NetworkPolicyError::InvalidUrl(url.to_string()));
         }
-        let (host, port) = parse_host(url).ok_or_else(|| NetworkPolicyError::InvalidUrl(url.to_string()))?;
+        let (host, port) =
+            parse_host(url).ok_or_else(|| NetworkPolicyError::InvalidUrl(url.to_string()))?;
         // Literal IP?
         if let Ok(ip) = host.parse::<IpAddr>() {
             if is_blocked_ip(ip) {

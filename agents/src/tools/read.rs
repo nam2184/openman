@@ -37,8 +37,8 @@ fn format_lines(content: &str, offset: usize, limit: Option<usize>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use serde_json::json;
+    use std::collections::HashMap;
 
     fn call(path: &str) -> ToolCall {
         ToolCall {
@@ -65,4 +65,3 @@ mod tests {
         assert!(!result.success);
     }
 }
-

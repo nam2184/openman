@@ -66,7 +66,11 @@ mod tests {
 
     #[test]
     fn action_serde_round_trip() {
-        for action in [PermissionAction::Allow, PermissionAction::Ask, PermissionAction::Deny] {
+        for action in [
+            PermissionAction::Allow,
+            PermissionAction::Ask,
+            PermissionAction::Deny,
+        ] {
             let s = serde_json::to_string(&action).unwrap();
             let back: PermissionAction = serde_json::from_str(&s).unwrap();
             assert_eq!(action, back);
@@ -80,8 +84,15 @@ mod tests {
 
     #[test]
     fn action_as_str_matches_serde() {
-        for action in [PermissionAction::Allow, PermissionAction::Ask, PermissionAction::Deny] {
-            assert_eq!(action.as_str(), serde_json::to_string(&action).unwrap().trim_matches('"'));
+        for action in [
+            PermissionAction::Allow,
+            PermissionAction::Ask,
+            PermissionAction::Deny,
+        ] {
+            assert_eq!(
+                action.as_str(),
+                serde_json::to_string(&action).unwrap().trim_matches('"')
+            );
         }
     }
 

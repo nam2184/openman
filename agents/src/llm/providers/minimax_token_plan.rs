@@ -90,12 +90,16 @@ mod tests {
 
         assert_eq!(config.protocol, ProviderProtocol::OpenAI);
         assert_eq!(provider.model_base_url(), Some(DEFAULT_BASE_URL));
-        assert_eq!(provider.chat_completions_url(), "https://api.minimax.com/v1/chat/completions");
+        assert_eq!(
+            provider.chat_completions_url(),
+            "https://api.minimax.io/v1/chat/completions"
+        );
     }
 
     #[tokio::test]
     async fn minimax_endpoint_returns_http_status() {
-        let provider = MiniMaxTokenPlanProvider::new(Some("invalid-token-plan-key".to_string()), None);
+        let provider =
+            MiniMaxTokenPlanProvider::new(Some("invalid-token-plan-key".to_string()), None);
         let status = provider.endpoint_status(DEFAULT_MODEL).await.unwrap();
 
         assert_ne!(status.as_u16(), 404);
@@ -104,20 +108,28 @@ mod tests {
 
     #[tokio::test]
     async fn stream_produces_events_or_http_error() {
-        let provider = MiniMaxTokenPlanProvider::new(Some("invalid-token-plan-key".to_string()), None);
-        let request = LlmRequest::new(DEFAULT_MODEL, "minimax").with_message(LlmMessage::user("say hello"));
+        let provider =
+            MiniMaxTokenPlanProvider::new(Some("invalid-token-plan-key".to_string()), None);
+        let request =
+            LlmRequest::new(DEFAULT_MODEL, "minimax").with_message(LlmMessage::user("say hello"));
 
         let result = provider.stream(request).await;
 
         if let Ok(stream) = result {
             let events: Vec<_> = stream.events.collect().await;
-            assert!(!events.is_empty(), "stream should produce at least one event");
+            assert!(
+                !events.is_empty(),
+                "stream should produce at least one event"
+            );
             let has_text_or_error = events.iter().any(|e| {
                 matches!(e, LlmEvent::TextDelta { .. })
                     || matches!(e, LlmEvent::ProviderError { .. })
                     || matches!(e, LlmEvent::Finish { .. })
             });
-            assert!(has_text_or_error, "stream should contain text, error, or finish event: {events:?}");
+            assert!(
+                has_text_or_error,
+                "stream should contain text, error, or finish event: {events:?}"
+            );
         } else {
             let err = match result {
                 Err(e) => e,

@@ -59,8 +59,8 @@ pub fn run_with_root(call: &ToolCall, root: &Path) -> ToolResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use serde_json::json;
+    use std::collections::HashMap;
 
     fn call(pattern: &str) -> ToolCall {
         ToolCall {
@@ -95,4 +95,3 @@ mod tests {
         assert!(!result.success);
     }
 }
-

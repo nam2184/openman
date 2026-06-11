@@ -46,7 +46,9 @@ fn wildcard_match_inner(pattern: &[u8], value: &[u8]) -> bool {
     }
     // Special case: opencode treats a trailing ` *` (space + star) as optional,
     // so `git *` matches `git` even though the literal space is in the pattern.
-    if p + 1 < pattern.len() && pattern[p] == b' ' && pattern[p + 1] == b'*'
+    if p + 1 < pattern.len()
+        && pattern[p] == b' '
+        && pattern[p + 1] == b'*'
         && pattern[p + 1..].iter().all(|c| *c == b'*')
     {
         return true;

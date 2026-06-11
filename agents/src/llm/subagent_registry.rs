@@ -174,7 +174,13 @@ impl SubagentRegistry {
         let mut frontier: Vec<String> = state
             .parent_of
             .iter()
-            .filter_map(|(child, parent)| if parent == root_id { Some(child.clone()) } else { None })
+            .filter_map(|(child, parent)| {
+                if parent == root_id {
+                    Some(child.clone())
+                } else {
+                    None
+                }
+            })
             .collect();
 
         while let Some(id) = frontier.pop() {

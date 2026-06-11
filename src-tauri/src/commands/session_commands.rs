@@ -1,4 +1,4 @@
-use openman_agents::{AgentSession, ConversationService, SessionGroup, SessionService};
+use arachne_agents::{AgentSession, ConversationService, SessionGroup, SessionService};
 use std::sync::Arc;
 use tauri::State;
 

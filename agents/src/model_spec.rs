@@ -86,8 +86,7 @@ impl ModelRegistry {
     }
 
     pub fn try_lookup(&self, provider: &str, model: &str) -> Option<&ModelSpec> {
-        self.specs
-            .get(&(provider.to_string(), model.to_string()))
+        self.specs.get(&(provider.to_string(), model.to_string()))
     }
 
     pub fn fallback(&self) -> &ModelSpec {
@@ -160,7 +159,9 @@ mod tests {
     #[test]
     fn try_lookup_returns_none_for_unknown() {
         let registry = sample_registry();
-        assert!(registry.try_lookup("anthropic", "claude-sonnet-4-20250514").is_some());
+        assert!(registry
+            .try_lookup("anthropic", "claude-sonnet-4-20250514")
+            .is_some());
         assert!(registry.try_lookup("anthropic", "unknown").is_none());
     }
 

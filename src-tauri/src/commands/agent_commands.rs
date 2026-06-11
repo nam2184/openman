@@ -7,10 +7,22 @@ use crate::services::agent_service::AgentService;
 pub async fn send_message(
     session_id: String,
     message: String,
+    mode: Option<String>,
     app: AppHandle,
     agent_service: State<'_, Arc<AgentService>>,
 ) -> Result<String, String> {
-    agent_service.send_message(&session_id, message, app).await
+    let mode = mode
+        .as_deref()
+        .map(parse_mode)
+        .transpose()?
+        .unwrap_or_default();
+    agent_service.send_message(&session_id, message, mode, app).await
+}
+
+fn parse_mode(value: &str) -> Result<arachne_agents::permission::PermissionMode, String> {
+    use std::str::FromStr;
+    arachne_agents::permission::PermissionMode::from_str(value)
+        .map_err(|_| format!("Invalid mode: {value}"))
 }
 
 #[tauri::command]

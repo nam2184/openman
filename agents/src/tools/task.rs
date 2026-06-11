@@ -72,10 +72,7 @@ pub async fn run_async(call: &ToolCall, runtime: ToolRuntime) -> ToolResult {
 
     // Loop control. The depth cap and ancestor cycle are checked here
     // before we even create a child row.
-    if let Err(deny) = runtime
-        .subagent_registry
-        .check_spawn(&caller.id, None)
-    {
+    if let Err(deny) = runtime.subagent_registry.check_spawn(&caller.id, None) {
         let msg = match deny {
             crate::llm::DenyReason::DepthExceeded => {
                 "sub-agents cannot spawn sub-agents (depth cap exceeded)".to_string()
@@ -83,9 +80,7 @@ pub async fn run_async(call: &ToolCall, runtime: ToolRuntime) -> ToolResult {
             crate::llm::DenyReason::AncestorCycle => {
                 "cannot target an ancestor session (cycle prevented)".to_string()
             }
-            crate::llm::DenyReason::SelfTarget => {
-                "cannot target the caller itself".to_string()
-            }
+            crate::llm::DenyReason::SelfTarget => "cannot target the caller itself".to_string(),
         };
         return failure("task", msg);
     }
@@ -148,12 +143,20 @@ pub async fn run_async(call: &ToolCall, runtime: ToolRuntime) -> ToolResult {
     };
     registry.push_completion(&parent_id, completion);
 
-    let state_label = if outcome.success { "completed" } else { "error" };
+    let state_label = if outcome.success {
+        "completed"
+    } else {
+        "error"
+    };
     let body = format!(
         "{envelope_open}<task_result>{}</task_result>\n</task>",
         escape_for_envelope(&outcome.text)
     );
-    let _state_label = if outcome.success { "completed" } else { "error" };
+    let _state_label = if outcome.success {
+        "completed"
+    } else {
+        "error"
+    };
     success_or_failure("task", outcome.success, body, outcome.error)
 }
 
@@ -179,14 +182,19 @@ struct ChildOutcome {
     error: Option<String>,
 }
 
-async fn run_child_foreground(child_id: String, prompt: String, runtime: ToolRuntime) -> ChildOutcome {
+async fn run_child_foreground(
+    child_id: String,
+    prompt: String,
+    runtime: ToolRuntime,
+) -> ChildOutcome {
     // 1. Append the parent's question as a synthetic user message on the
     //    child's conversation. This is what the child "sees" as the
     //    starting point.
-    let prompt_id = match runtime
-        .conversation_service
-        .append_message(&child_id, crate::MessageRole::User, prompt)
-    {
+    let prompt_id = match runtime.conversation_service.append_message(
+        &child_id,
+        crate::MessageRole::User,
+        prompt,
+    ) {
         Ok(id) => id,
         Err(e) => {
             return ChildOutcome {
@@ -232,8 +240,8 @@ async fn run_child_foreground(child_id: String, prompt: String, runtime: ToolRun
         Ok(Ok(_result)) => {
             // Extract the last assistant text from the child's
             // conversation.
-            let text = last_assistant_text(&runtime.conversation_service, &child_id)
-                .unwrap_or_default();
+            let text =
+                last_assistant_text(&runtime.conversation_service, &child_id).unwrap_or_default();
             ChildOutcome {
                 success: true,
                 text,

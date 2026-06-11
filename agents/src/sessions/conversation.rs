@@ -79,6 +79,62 @@ impl ConversationService {
         Ok(message_id)
     }
 
+    /// Persist an assistant message inline during streaming. Unlike
+    /// `append_message` (which buffers the whole assistant turn in memory
+    /// and writes once at the end), this updates the persisted content
+    /// of an existing assistant message in place. If no message with
+    /// `message_id` exists yet, a new one is created with the supplied
+    /// initial content. Subsequent calls REPLACE the content of that
+    /// message (callers compose the full ContentPart JSON before each
+    /// write).
+    ///
+    /// This is what makes the runner crash-resilient: tool calls and
+    /// tool results are flushed to disk as they arrive, so an
+    /// unexpected process exit leaves a coherent partial message in
+    /// the file rather than losing the entire turn.
+    pub fn upsert_message_content(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        role: MessageRole,
+        content: &str,
+    ) -> Result<(), String> {
+        let session_lock = self.get_lock(session_id);
+        let _session_guard = session_lock.lock();
+        let lock_path = self.lock_file_path(session_id);
+        let _file_guard = self.acquire_lock(&lock_path)?;
+
+        let mut ai_conv = self.read_ai_conversation(session_id)?;
+        if let Some(existing) = ai_conv.messages.iter_mut().find(|m| m.id == message_id) {
+            existing.content = content.to_string();
+        } else {
+            let mut message = ConversationMessage::from(Message::new(
+                session_id.to_string(),
+                role.clone(),
+                content.to_string(),
+            ));
+            message.id = message_id.to_string();
+            ai_conv.messages.push(message);
+        }
+        self.write_ai_conversation(session_id, &ai_conv)?;
+
+        let mut ui_conv = self.read_ui_conversation(session_id)?;
+        if let Some(existing) = ui_conv.messages.iter_mut().find(|m| m.id == message_id) {
+            existing.content = content.to_string();
+        } else {
+            let mut message = ConversationMessage::from(Message::new(
+                session_id.to_string(),
+                role.clone(),
+                content.to_string(),
+            ));
+            message.id = message_id.to_string();
+            ui_conv.messages.push(message);
+        }
+        self.write_ui_conversation(session_id, &ui_conv)?;
+
+        Ok(())
+    }
+
     pub fn read_ai_conversation(&self, session_id: &str) -> Result<ConversationFile, String> {
         self.read_conversation_or_empty(session_id, self.ai_file_path(session_id), "conversation")
     }

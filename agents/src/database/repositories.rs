@@ -2,7 +2,9 @@ use chrono::{DateTime, Utc};
 use rusqlite::params;
 
 use crate::database::connection::Database;
-use crate::{AgentSession, Message, MessageRole, Project, ProviderConfig, ProviderProtocol, SessionGroup};
+use crate::{
+    AgentSession, Message, MessageRole, Project, ProviderConfig, ProviderProtocol, SessionGroup,
+};
 
 pub struct ProjectRepository;
 
@@ -478,7 +480,8 @@ mod tests {
     use rusqlite::Connection;
 
     fn ts(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(year, month, day, hour, min, sec).unwrap()
+        Utc.with_ymd_and_hms(year, month, day, hour, min, sec)
+            .unwrap()
     }
 
     fn sample_project(id: &str, name: &str) -> Project {
@@ -522,11 +525,11 @@ mod tests {
     #[test]
     fn project_insert_then_find_by_id() {
         let (db, _guard) = test_db();
-        let project = sample_project("p1", "openman");
+        let project = sample_project("p1", "arachne");
         ProjectRepository::insert(&db, &project).unwrap();
         let found = ProjectRepository::find_by_id(&db, "p1").unwrap().unwrap();
         assert_eq!(found.id, "p1");
-        assert_eq!(found.name, "openman");
+        assert_eq!(found.name, "arachne");
         assert_eq!(found.tech_stack, vec!["rust".to_string()]);
     }
 
@@ -545,7 +548,7 @@ mod tests {
     #[test]
     fn project_delete_removes_record() {
         let (db, _guard) = test_db();
-        ProjectRepository::insert(&db, &sample_project("p1", "openman")).unwrap();
+        ProjectRepository::insert(&db, &sample_project("p1", "arachne")).unwrap();
         ProjectRepository::delete(&db, "p1").unwrap();
         let found = ProjectRepository::find_by_id(&db, "p1").unwrap();
         assert!(found.is_none());
@@ -564,7 +567,7 @@ mod tests {
     // ---------------------------------------------------------------------
 
     fn seed_project(db: &Database) {
-        ProjectRepository::insert(db, &sample_project("p1", "openman")).unwrap();
+        ProjectRepository::insert(db, &sample_project("p1", "arachne")).unwrap();
     }
 
     #[test]
@@ -823,7 +826,11 @@ mod tests {
         SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
 
         // Insert out of order on purpose.
-        let mut third = Message::new("s1".to_string(), MessageRole::Assistant, "third".to_string());
+        let mut third = Message::new(
+            "s1".to_string(),
+            MessageRole::Assistant,
+            "third".to_string(),
+        );
         third.timestamp = ts(2026, 1, 1, 13, 0, 0);
         let mut first = Message::new("s1".to_string(), MessageRole::User, "first".to_string());
         first.timestamp = ts(2026, 1, 1, 11, 0, 0);
@@ -858,7 +865,9 @@ mod tests {
         MessageRepository::insert(&db, &m1).unwrap();
         MessageRepository::insert(&db, &m2).unwrap();
         MessageRepository::delete_by_session(&db, "s1").unwrap();
-        assert!(MessageRepository::find_by_session(&db, "s1").unwrap().is_empty());
+        assert!(MessageRepository::find_by_session(&db, "s1")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -867,9 +876,13 @@ mod tests {
         seed_project(&db);
         SessionRepository::insert(&db, &sample_session("s1", "p1")).unwrap();
 
-        for (i, role) in [MessageRole::User, MessageRole::Assistant, MessageRole::System]
-            .into_iter()
-            .enumerate()
+        for (i, role) in [
+            MessageRole::User,
+            MessageRole::Assistant,
+            MessageRole::System,
+        ]
+        .into_iter()
+        .enumerate()
         {
             let mut m = Message::new("s1".to_string(), role.clone(), format!("msg-{i}"));
             m.timestamp = ts(2026, 1, 1, 10, i as u32, 0);
@@ -893,7 +906,9 @@ mod tests {
         let cfg = sample_provider_config("anthropic", ProviderProtocol::Anthropic);
         ProviderConfigRepository::upsert(&db, &cfg).unwrap();
 
-        let found = ProviderConfigRepository::find_by_name(&db, "anthropic").unwrap().unwrap();
+        let found = ProviderConfigRepository::find_by_name(&db, "anthropic")
+            .unwrap()
+            .unwrap();
         assert_eq!(found.name, "anthropic");
         assert_eq!(found.protocol, ProviderProtocol::Anthropic);
         assert!(found.enabled);
@@ -911,7 +926,9 @@ mod tests {
         cfg.enabled = false;
         ProviderConfigRepository::upsert(&db, &cfg).unwrap();
 
-        let found = ProviderConfigRepository::find_by_name(&db, "anthropic").unwrap().unwrap();
+        let found = ProviderConfigRepository::find_by_name(&db, "anthropic")
+            .unwrap()
+            .unwrap();
         assert_eq!(found.model, "claude-opus-4-20250514");
         assert_eq!(found.api_key.as_deref(), Some("sk-rotated"));
         assert!(!found.enabled);
@@ -976,7 +993,9 @@ mod tests {
         let anthropic = ProviderConfigRepository::find_by_name(&db, "anthropic")
             .unwrap()
             .unwrap();
-        let openai = ProviderConfigRepository::find_by_name(&db, "openai").unwrap().unwrap();
+        let openai = ProviderConfigRepository::find_by_name(&db, "openai")
+            .unwrap()
+            .unwrap();
         assert_eq!(anthropic.protocol, ProviderProtocol::Anthropic);
         assert_eq!(openai.protocol, ProviderProtocol::OpenAI);
     }
@@ -989,7 +1008,7 @@ mod tests {
     fn second_connection_sees_inserts_from_first() {
         let (db, guard) = test_db();
         let path = guard.path().join("test.sqlite");
-        ProjectRepository::insert(&db, &sample_project("p1", "openman")).unwrap();
+        ProjectRepository::insert(&db, &sample_project("p1", "arachne")).unwrap();
 
         // Open a fresh connection to the same file and verify it sees the project.
         let conn2 = Connection::open(&path).unwrap();
@@ -1145,7 +1164,9 @@ impl ProviderConfigRepository {
     pub fn list(db: &Database) -> Result<Vec<ProviderConfig>, String> {
         let mut stmt = db
             .connection()
-            .prepare("SELECT name, model, api_key, base_url, protocol, enabled FROM provider_configs")
+            .prepare(
+                "SELECT name, model, api_key, base_url, protocol, enabled FROM provider_configs",
+            )
             .map_err(|e| e.to_string())?;
 
         let configs = stmt

@@ -1,1 +1,1 @@
-pub use openman_agents::language_detection::StackDetector;
+pub use arachne_agents::language_detection::StackDetector;

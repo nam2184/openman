@@ -29,10 +29,7 @@ pub fn run_with_path(call: &ToolCall, path: &Path) -> ToolResult {
     };
 
     match mutation.write_text_preserving_bom(&target, &content) {
-        Ok(_) => success(
-            "write",
-            format!("Wrote {}", target.canonical.display()),
-        ),
+        Ok(_) => success("write", format!("Wrote {}", target.canonical.display())),
         Err(error) => failure("write", error.to_string()),
     }
 }
@@ -44,8 +41,8 @@ pub fn run_with_pathbuf(call: &ToolCall, path: PathBuf) -> ToolResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use serde_json::json;
+    use std::collections::HashMap;
 
     fn call(path: &str, content: &str) -> ToolCall {
         ToolCall {
@@ -66,4 +63,3 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "hi");
     }
 }
-

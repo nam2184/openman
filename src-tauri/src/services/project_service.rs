@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use openman_agents::{Database, Project, ProjectRepository};
+use arachne_agents::{Database, Project, ProjectRepository};
 
 use crate::services::stack_detector::StackDetector;
 
