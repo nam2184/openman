@@ -1005,6 +1005,33 @@ fn default_tool_definitions() -> Vec<crate::llm::events::ToolDefinition> {
                 "required": ["content"]
             }),
         ),
+        crate::llm::events::ToolDefinition::new(
+            "ask_peer",
+            "Ask a question of a peer session in a different project. The peer runs \
+             read-only (read/glob/grep/webfetch), so this is for consulting another \
+             session's analysis without risking writes. Cross-repo only — the caller \
+             and peer must live in different directories.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "peer_session_id": {
+                        "type": "string",
+                        "description": "ID of the peer session to consult"
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "The question to ask the peer"
+                    },
+                    "max_turns": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "Maximum number of model turns the peer is allowed to take (1-5, default 3)"
+                    }
+                },
+                "required": ["peer_session_id", "question"]
+            }),
+        ),
     ]
 }
 
