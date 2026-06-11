@@ -3,7 +3,6 @@ pub mod providers;
 pub mod request;
 pub mod session;
 pub mod subagent_registry;
-pub mod xml_tools;
 
 pub use events::{
     FinishReason, LlmEvent, TaskKind, TaskState, ToolContentPart, ToolDefinition, ToolResultValue,

@@ -277,17 +277,39 @@ impl SessionRunner {
             default_tool_definitions()
         };
 
-        // The LLM is told about tools via the system prompt (in XML
-        // block format) rather than via the request body's `tools`
-        // field. Providers don't send a structured `tools` array; the
-        // runner parses tool calls out of the streamed `text_delta`
-        // events below.
-        let tool_prompt = crate::llm::xml_tools::render_tools_as_prompt(&tools);
-        let system_prompt = format!("{system_prompt}{tool_prompt}");
+        // The LLM is told about tools via the request body's
+        // structured `tools` field. Providers return tool calls as
+        // structured events (`delta.tool_calls` for OpenAI-Chat,
+        // `content_block` of `type: "tool_use"` for Anthropic), which
+        // the provider stream parsers translate into
+        // `LlmEvent::ToolInput*` / `LlmEvent::ToolCall` events. We
+        // do NOT inject an XML tool description into the system
+        // prompt; that would be contradictory.
+
+        // Log the assembled prompt so debug runs can see exactly
+        // what we sent the model: the system prompt (with mode
+        // prefix), the message history, and the structured tool
+        // catalog. Truncated to 2 KiB so the line doesn't blow up
+        // the log when the conversation is long.
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        tracing::info!(
+            session_id = %session_id,
+            step = step,
+            provider = %session.provider,
+            model = %session.model,
+            mode = ?self.mode,
+            tool_count = tools.len(),
+            tools = ?tool_names,
+            system_prompt_bytes = system_prompt.len(),
+            message_count = messages.len(),
+            system_prompt_preview = %system_prompt.chars().take(2048).collect::<String>(),
+            "llm request assembled: sending to provider"
+        );
 
         let request = LlmRequest::new(&session.model, &session.provider)
-            .with_system(system_prompt)
-            .with_messages(messages);
+            .with_system(system_prompt.clone())
+            .with_messages(messages)
+            .with_tools(tools);
 
         let provider = self
             .providers
@@ -317,13 +339,17 @@ impl SessionRunner {
         let assistant_message_id = format!("assistant-{}", uuid::Uuid::new_v4());
 
         let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new();
-        let mut accumulated_text = String::new();
+        // Buffer for text deltas. Used to detect <think>…</think>
+        // markers in models that emit thinking as raw text instead
+        // of via the structured `ReasoningDelta` channel (some
+        // local/open-weight models). We don't parse tool calls out
+        // of this buffer — tool calls arrive as structured
+        // `LlmEvent::ToolCall` events from the provider.
+        let mut text_buffer = String::new();
         let mut in_think_block = false;
         let mut assistant_parts: Vec<ContentPart> = Vec::new();
         let mut needs_continuation = false;
         let mut finish_reason = FinishReason::Unknown;
-        let mut tool_id_counter: u32 = 0;
-        let known_tool_names = crate::llm::xml_tools::known_tool_set(&tools);
 
         // Helper to flush the current `assistant_parts` snapshot to
         // the conversation file under `assistant_message_id`. Errors
@@ -388,29 +414,23 @@ impl SessionRunner {
 
             match event {
                 LlmEvent::TextDelta { text, .. } => {
-                    accumulated_text.push_str(&text);
+                    // Buffer text so we can still detect <think>…</think>
+                    // markers for models that emit thinking as raw
+                    // text. The buffered text is flushed as visible
+                    // text or as `Reasoning` parts at TextEnd (or
+                    // stream end) — never as tool calls.
+                    text_buffer.push_str(&text);
                 }
                 LlmEvent::TextEnd { .. } => {
-                    process_accumulated_text(
-                        &mut accumulated_text,
-                        &mut assistant_parts,
+                    flush_text_buffer(
+                        &mut text_buffer,
                         &mut in_think_block,
-                        &known_tool_names,
-                        &mut tool_id_counter,
-                        &mut pending_tool_calls,
-                        &mut needs_continuation,
+                        &mut assistant_parts,
                     );
                 }
                 LlmEvent::ReasoningDelta { text, .. } => {
                     if !text.is_empty() {
                         assistant_parts.push(ContentPart::reasoning(&text));
-                    }
-                }
-                LlmEvent::ToolInputDelta { id, name: _, text } => {
-                    if let Some((_, _, buf)) =
-                        pending_tool_calls.iter_mut().find(|(cid, _, _)| cid == &id)
-                    {
-                        buf.push_str(&text);
                     }
                 }
                 LlmEvent::ToolCall {
@@ -423,6 +443,14 @@ impl SessionRunner {
                     let input_str = serde_json::to_string(&input).unwrap_or_default();
                     assistant_parts.push(ContentPart::tool_call(&id, &name, input.clone()));
                     pending_tool_calls.push((id, name, input_str));
+                    tracing::info!(
+                        session_id = %session_id,
+                        step = step,
+                        tool = %pending_tool_calls.last().map(|(_, n, _)| n.as_str()).unwrap_or("?"),
+                        tool_call_id = %pending_tool_calls.last().map(|(i, _, _)| i.as_str()).unwrap_or("?"),
+                        source = "structured",
+                        "received structured tool call from provider"
+                    );
                 }
                 LlmEvent::ToolResult {
                     id, name, result, ..
@@ -470,16 +498,8 @@ impl SessionRunner {
             }
         }
 
-        if !accumulated_text.is_empty() || in_think_block {
-            process_accumulated_text(
-                &mut accumulated_text,
-                &mut assistant_parts,
-                &mut in_think_block,
-                &known_tool_names,
-                &mut tool_id_counter,
-                &mut pending_tool_calls,
-                &mut needs_continuation,
-            );
+        if !text_buffer.is_empty() || in_think_block {
+            flush_text_buffer(&mut text_buffer, &mut in_think_block, &mut assistant_parts);
         }
 
         // After the stream is done, dispatch the pending tool calls.
@@ -494,14 +514,14 @@ impl SessionRunner {
             let project_root = std::path::PathBuf::from(&session.directory);
             let ctx = ToolContext::new(self.mode)
                 .with_project_root(project_root.clone());
-            tracing::debug!(
+            tracing::info!(
                 session_id = %session_id,
                 step = step,
                 count = pending_tool_calls.len(),
                 mode = ?self.mode,
+                session_directory = %session.directory,
                 project_root = %project_root.display(),
                 project_root_is_empty = project_root.as_os_str().is_empty(),
-                session_directory = %session.directory,
                 cwd = %std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|_| "<unknown>".to_string()),
@@ -797,9 +817,9 @@ fn system_prompt_for_session(provider: &str, _extra: &[String]) -> String {
     };
 
     // Mirrors the opencode / claude-code style: short, direct,
-    // CLI-oriented. The tool list is appended separately by
-    // `xml_tools::render_tools_as_prompt`, which the runner injects
-    // after this base prompt.
+    // CLI-oriented. The list of available tools is sent on the
+    // request as a structured `tools` field; the model is expected
+    // to use the provider's native tool-calling API.
     format!(
         "You are {name}, the Arachne coding agent — an interactive CLI tool that \
          helps users with software engineering tasks. Use the instructions below and the \
@@ -829,230 +849,60 @@ fn system_prompt_for_session(provider: &str, _extra: &[String]) -> String {
          `file_path:line_number` so the user can navigate directly to the source.\n\n\
          \
          # Tool invocation\n\
-         - The list of available tools and their argument schemas follows in the next \
-         section of this prompt. To call a tool, emit a fenced XML block as documented \
-         there. Do not call a tool that isn't listed. Do not invent argument names.",
+         - The list of available tools and their JSON-Schema argument \
+         definitions is sent on the request, not in this prompt. \
+         To call a tool, use the provider's native tool-calling API. \
+         Do not call a tool that isn't listed. Do not invent argument names.",
         name = agent_name,
     )
 }
 
-/// Splits an accumulated text buffer into a sequence of `ContentPart`s,
-/// extracting any `<think>...</think>` blocks into `Reasoning` parts and
-/// the rest into `Text` parts. Unterminated `<think>` (no closing tag yet)
-/// is treated as still-in-progress reasoning and yielded as `Reasoning`,
-/// so the streaming UI can render live thinking.
-fn split_text_with_think_blocks(buffer: &str) -> Vec<ContentPart> {
-    let mut parts: Vec<ContentPart> = Vec::new();
-    let mut rest = buffer;
+/// Flush the text buffer into `assistant_parts`, splitting out any
+/// `<think>...</think>` blocks as `Reasoning` parts. This is a
+/// fallback for models that emit thinking as raw text instead of via
+/// the structured `ReasoningDelta` channel. We never extract tool
+/// calls from this buffer — tool calls arrive as structured
+/// `LlmEvent::ToolCall` events from the provider.
+///
+/// If a `<think>` is open at flush time, the buffered content is
+/// yielded as `Reasoning` (so the UI can render the partial
+/// thinking).
+fn flush_text_buffer(
+    buffer: &mut String,
+    in_think_block: &mut bool,
+    assistant_parts: &mut Vec<ContentPart>,
+) {
+    if buffer.is_empty() {
+        return;
+    }
+
+    let mut rest = std::mem::take(buffer);
+    *in_think_block = false;
 
     while let Some(open_idx) = rest.find("<think>") {
         let before = &rest[..open_idx];
         if !before.is_empty() {
-            parts.push(ContentPart::text(before));
+            assistant_parts.push(ContentPart::text(before));
         }
 
         let after_open = &rest[open_idx + "<think>".len()..];
         if let Some(close_idx) = after_open.find("</think>") {
             let think = &after_open[..close_idx];
             if !think.is_empty() {
-                parts.push(ContentPart::reasoning(think));
+                assistant_parts.push(ContentPart::reasoning(think));
             }
-            rest = &after_open[close_idx + "</think>".len()..];
+            rest = after_open[close_idx + "</think>".len()..].to_string();
         } else {
             if !after_open.is_empty() {
-                parts.push(ContentPart::reasoning(after_open));
+                assistant_parts.push(ContentPart::reasoning(after_open));
             }
-            rest = "";
-            break;
+            *in_think_block = true;
+            return;
         }
     }
 
     if !rest.is_empty() {
-        parts.push(ContentPart::text(rest));
-    }
-
-    parts
-}
-
-#[cfg(test)]
-/// Scans `buffer` for a complete `<think>...</think>` block. If one is
-/// found, the surrounding text is split into `Text` and `Reasoning`
-/// parts and pushed onto `parts`; the buffer is updated to contain
-/// everything after the closing tag. If a `<think>` was opened but not
-/// yet closed, the open-tag text is held in `buffer` and `in_think_block`
-/// is set so the next call can finalize it. Anything before the open tag
-/// is flushed as `Text` parts.
-fn drain_complete_think_blocks(
-    buffer: &mut String,
-    parts: &mut Vec<ContentPart>,
-    in_think_block: &mut bool,
-) {
-    loop {
-        if *in_think_block {
-            let Some(close_idx) = buffer.find("</think>") else {
-                return;
-            };
-            let think = buffer[..close_idx].to_string();
-            if !think.is_empty() {
-                parts.push(ContentPart::reasoning(think));
-            }
-            // `drain(..end)` removes the consumed prefix (everything up
-            // to and including the closing tag) and returns the removed
-            // bytes. The buffer is left with the suffix; we drop the
-            // iterator's collected bytes.
-            let _: String = buffer.drain(..close_idx + "</think>".len()).collect();
-            *in_think_block = false;
-        }
-
-        let Some(open_idx) = buffer.find("<think>") else {
-            if !buffer.is_empty() {
-                let rest = std::mem::take(buffer);
-                parts.push(ContentPart::text(rest));
-            }
-            return;
-        };
-
-        if open_idx > 0 {
-            let before = buffer[..open_idx].to_string();
-            parts.push(ContentPart::text(before));
-        }
-        // Drop the open tag; keep whatever follows as the in-progress
-        // thinking buffer.
-        let after_open = buffer[open_idx + "<think>".len()..].to_string();
-        buffer.clear();
-        buffer.push_str(&after_open);
-        *in_think_block = true;
-    }
-}
-
-#[cfg(test)]
-/// Final flush of any remaining text in the buffer. Handles both
-/// unterminated `<think>` blocks (yielded as `Reasoning`) and plain text
-/// (yielded as `Text`).
-fn flush_accumulated_text(
-    buffer: &mut String,
-    parts: &mut Vec<ContentPart>,
-    in_think_block: &mut bool,
-) {
-    if buffer.is_empty() {
-        return;
-    }
-
-    if *in_think_block {
-        if !buffer.is_empty() {
-            parts.push(ContentPart::reasoning(buffer.as_str()));
-        }
-    } else if buffer.contains("<think>") {
-        let split = split_text_with_think_blocks(buffer);
-        for part in split {
-            parts.push(part);
-        }
-    } else {
-        parts.push(ContentPart::text(buffer.as_str()));
-    }
-    buffer.clear();
-    *in_think_block = false;
-}
-
-#[allow(clippy::too_many_arguments)]
-fn process_accumulated_text(
-    buffer: &mut String,
-    assistant_parts: &mut Vec<ContentPart>,
-    in_think_block: &mut bool,
-    known_tools: &std::collections::HashSet<String>,
-    id_counter: &mut u32,
-    pending_tool_calls: &mut Vec<(String, String, String)>,
-    needs_continuation: &mut bool,
-) {
-    if buffer.is_empty() {
-        return;
-    }
-
-    let parts = split_text_with_think_blocks(buffer);
-    buffer.clear();
-    *in_think_block = false;
-
-    for part in parts {
-        match part {
-            ContentPart::Text { text } => drain_text_for_tool_blocks(
-                &text,
-                known_tools,
-                id_counter,
-                pending_tool_calls,
-                assistant_parts,
-                needs_continuation,
-            ),
-            ContentPart::Reasoning { text } => {
-                if !text.is_empty() {
-                    assistant_parts.push(ContentPart::reasoning(text));
-                }
-            }
-            ContentPart::ToolCall { .. } | ContentPart::ToolResult { .. } => {}
-        }
-    }
-}
-
-/// Pull complete XML tool blocks out of the accumulated text buffer.
-/// Each `Valid` block becomes a queued tool call that will be dispatched
-/// after the stream ends. Each `Invalid` block is fed back to the LLM
-/// as a synthetic `ToolError` so the model can correct itself on the
-/// next turn.
-#[allow(clippy::too_many_arguments)]
-fn drain_text_for_tool_blocks(
-    text: &str,
-    known_tools: &std::collections::HashSet<String>,
-    id_counter: &mut u32,
-    pending_tool_calls: &mut Vec<(String, String, String)>,
-    assistant_parts: &mut Vec<ContentPart>,
-    needs_continuation: &mut bool,
-) {
-    if text.is_empty() {
-        return;
-    }
-
-    let segments =
-        crate::llm::xml_tools::drain_tool_blocks_preserving_text(text, known_tools, id_counter);
-
-    for segment in segments {
-        match segment {
-            crate::llm::xml_tools::DrainedToolSegment::Text(text) => {
-                if !text.is_empty() {
-                    assistant_parts.push(ContentPart::text(text));
-                }
-            }
-            crate::llm::xml_tools::DrainedToolSegment::Tool(
-                crate::llm::xml_tools::ParsedToolBlock::Valid { id, tool, input },
-            ) => {
-                *needs_continuation = true;
-                let input_str = serde_json::to_string(&input).unwrap_or_default();
-                assistant_parts.push(ContentPart::tool_call(&id, &tool, input.clone()));
-                pending_tool_calls.push((id.clone(), tool.clone(), input_str.clone()));
-                tracing::info!(
-                    tool_call_id = %id,
-                    tool = %tool,
-                    input = %input_str,
-                    "parsed valid tool block; queued for dispatch"
-                );
-            }
-            crate::llm::xml_tools::DrainedToolSegment::Tool(
-                crate::llm::xml_tools::ParsedToolBlock::Invalid { tool, reason },
-            ) => {
-                let id = format!("xml-err-{}", *id_counter);
-                *id_counter += 1;
-                *needs_continuation = true;
-                let result = serde_json::json!({ "error": reason });
-                assistant_parts.push(ContentPart::tool_result(&id, &tool, result));
-                tracing::warn!(
-                    tool = %tool,
-                    tool_result_id = %id,
-                    reason = %reason,
-                    "parsed invalid tool block; feeding ToolError back to LLM"
-                );
-            }
-            crate::llm::xml_tools::DrainedToolSegment::Tool(
-                crate::llm::xml_tools::ParsedToolBlock::Incomplete,
-            ) => {}
-        }
+        assistant_parts.push(ContentPart::text(rest));
     }
 }
 
@@ -1335,17 +1185,6 @@ mod tests {
         assert!(system_prompt_for_session("minimax", &[]).contains("MiniMax"));
     }
 
-    fn split_text(buffer: &str) -> Vec<ContentPart> {
-        let mut parts = Vec::new();
-        let mut buf = buffer.to_string();
-        let mut in_think = false;
-        drain_complete_think_blocks(&mut buf, &mut parts, &mut in_think);
-        if !buf.is_empty() || in_think {
-            flush_accumulated_text(&mut buf, &mut parts, &mut in_think);
-        }
-        parts
-    }
-
     fn part_text(p: &ContentPart) -> Option<&str> {
         match p {
             ContentPart::Text { text } => Some(text.as_str()),
@@ -1358,27 +1197,49 @@ mod tests {
         matches!(p, ContentPart::Reasoning { .. })
     }
 
-    #[test]
-    fn split_text_passthrough_when_no_think_block() {
-        let parts = split_text("hello world");
-        assert_eq!(parts.len(), 1);
-        assert_eq!(part_text(&parts[0]), Some("hello world"));
-        assert!(!part_is_reasoning(&parts[0]));
+    fn part_is_text(p: &ContentPart) -> bool {
+        matches!(p, ContentPart::Text { .. })
+    }
+
+    fn flush_for_test(buffer: &str) -> Vec<ContentPart> {
+        let mut parts: Vec<ContentPart> = Vec::new();
+        let mut buf = buffer.to_string();
+        let mut in_think = false;
+        flush_text_buffer(&mut buf, &mut in_think, &mut parts);
+        if !buf.is_empty() || in_think {
+            // If the buffer still has content (open think block
+            // at end), the production path yields it as Reasoning.
+            // The test helper does the same.
+            if in_think && !buf.is_empty() {
+                parts.push(ContentPart::reasoning(&buf));
+            } else if !buf.is_empty() {
+                parts.push(ContentPart::text(&buf));
+            }
+        }
+        parts
     }
 
     #[test]
-    fn split_text_extracts_complete_think_block() {
-        let parts = split_text("<think>plan</think>answer");
+    fn flush_text_buffer_passthrough_when_no_think_block() {
+        let parts = flush_for_test("hello world");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(part_text(&parts[0]), Some("hello world"));
+        assert!(part_is_text(&parts[0]));
+    }
+
+    #[test]
+    fn flush_text_buffer_extracts_complete_think_block() {
+        let parts = flush_for_test("<think>plan</think>answer");
         assert_eq!(parts.len(), 2);
         assert!(part_is_reasoning(&parts[0]));
         assert_eq!(part_text(&parts[0]), Some("plan"));
-        assert!(!part_is_reasoning(&parts[1]));
+        assert!(part_is_text(&parts[1]));
         assert_eq!(part_text(&parts[1]), Some("answer"));
     }
 
     #[test]
-    fn split_text_with_text_before_and_after() {
-        let parts = split_text("hi<think>reason</think>bye");
+    fn flush_text_buffer_handles_text_before_and_after() {
+        let parts = flush_for_test("hi<think>reason</think>bye");
         assert_eq!(parts.len(), 3);
         assert_eq!(part_text(&parts[0]), Some("hi"));
         assert_eq!(part_text(&parts[1]), Some("reason"));
@@ -1387,16 +1248,8 @@ mod tests {
     }
 
     #[test]
-    fn split_text_with_unterminated_think_block_flushes_as_reasoning() {
-        let parts = split_text("<think>still thinking...");
-        assert_eq!(parts.len(), 1);
-        assert!(part_is_reasoning(&parts[0]));
-        assert_eq!(part_text(&parts[0]), Some("still thinking..."));
-    }
-
-    #[test]
-    fn split_text_handles_multiple_think_blocks() {
-        let parts = split_text("<think>a</think>X<think>b</think>Y");
+    fn flush_text_buffer_handles_multiple_think_blocks() {
+        let parts = flush_for_test("<think>a</think>X<think>b</think>Y");
         assert_eq!(parts.len(), 4);
         assert!(part_is_reasoning(&parts[0]));
         assert_eq!(part_text(&parts[0]), Some("a"));
@@ -1407,194 +1260,53 @@ mod tests {
     }
 
     #[test]
-    fn split_text_empty_think_block() {
-        let parts = split_text("<think></think>after");
-        assert_eq!(parts.len(), 1);
-        assert_eq!(part_text(&parts[0]), Some("after"));
-    }
-
-    #[test]
-    fn streaming_drain_emits_text_then_reasoning_as_blocks_complete() {
+    fn flush_text_buffer_unterminated_think_yields_reasoning() {
+        // An unterminated `<think>` should still surface its
+        // content as a partial Reasoning part so the UI can
+        // render the live thinking text. `in_think` is set so a
+        // subsequent call (e.g. when the close tag finally
+        // arrives) knows we're mid-thought.
         let mut parts: Vec<ContentPart> = Vec::new();
-        let mut buf = String::new();
+        let mut buf = "<think>still thinking...".to_string();
         let mut in_think = false;
-
-        // Simulate streaming the LLM's first response token by token.
-        for chunk in ["<think>", "plan", "</think>", "\n\n", "It looks"] {
-            buf.push_str(chunk);
-            drain_complete_think_blocks(&mut buf, &mut parts, &mut in_think);
-        }
-
-        // We expect three parts: the reasoning block, the text fragment
-        // that came in before any new text joined it, and the final
-        // text fragment.
-        assert_eq!(parts.len(), 3);
+        flush_text_buffer(&mut buf, &mut in_think, &mut parts);
+        assert_eq!(parts.len(), 1, "unterminated think should yield a partial Reasoning, got: {parts:?}");
         assert!(part_is_reasoning(&parts[0]));
-        assert_eq!(part_text(&parts[0]), Some("plan"));
-        assert!(!part_is_reasoning(&parts[1]));
-        assert_eq!(part_text(&parts[1]), Some("\n\n"));
-        assert!(!part_is_reasoning(&parts[2]));
-        assert_eq!(part_text(&parts[2]), Some("It looks"));
-        assert!(buf.is_empty());
-        assert!(!in_think);
+        assert_eq!(part_text(&parts[0]), Some("still thinking..."));
+        assert!(in_think, "in_think must be set so the runner knows we're mid-thought");
     }
 
     #[test]
-    fn process_aggregated_text_parses_xml_tool_after_full_text() {
-        let mut parts: Vec<ContentPart> = Vec::new();
-        let mut buf = "I will read it.\n<read>\n<path>src/lib.rs</path>\n</read>".to_string();
-        let mut in_think = false;
-        let mut known_tools = std::collections::HashSet::new();
-        known_tools.insert("read".to_string());
-        let mut id_counter = 0;
-        let mut pending = Vec::new();
-        let mut needs_continuation = false;
-
-        eprintln!("=== INPUT ===\n{buf}\n=== END INPUT ===");
-        process_accumulated_text(
-            &mut buf,
-            &mut parts,
-            &mut in_think,
-            &known_tools,
-            &mut id_counter,
-            &mut pending,
-            &mut needs_continuation,
+    fn flush_text_buffer_xml_tool_call_is_not_parsed_as_tool() {
+        // Regression test: after removing the XML-tool parser, an
+        // XML tool call embedded in text MUST NOT become a
+        // `ContentPart::ToolCall`. It is preserved as visible
+        // text. The runner no longer extracts tool calls from
+        // text — they arrive as structured `LlmEvent::ToolCall`
+        // events from the provider.
+        let parts = flush_for_test("I will read it.\n<read>\n<path>src/lib.rs</path>\n</read>");
+        assert!(
+            !parts.iter().any(|p| matches!(p, ContentPart::ToolCall { .. })),
+            "xml tool call must NOT be parsed as ContentPart::ToolCall, got: {parts:?}"
         );
-
-        eprintln!("=== PARTS ({}) ===", parts.len());
-        for (i, part) in parts.iter().enumerate() {
-            match part {
-                ContentPart::Text { text } => eprintln!("[{i}] Text: {text:?}"),
-                ContentPart::Reasoning { text } => eprintln!("[{i}] Reasoning: {text:?}"),
-                ContentPart::ToolCall { id, name, input } => eprintln!("[{i}] ToolCall: id={id} name={name} input={input}"),
-                ContentPart::ToolResult { id, name, result } => eprintln!("[{i}] ToolResult: id={id} name={name} result={result}"),
-            }
-        }
-        eprintln!("=== PENDING ({}) ===", pending.len());
-        for (i, (id, name, input)) in pending.iter().enumerate() {
-            eprintln!("[{i}] Pending: id={id} name={name} input={input}");
-        }
-        eprintln!("=== NEEDS_CONTINUATION: {needs_continuation} ===");
-        eprintln!("=== END ===");
-
-        assert!(buf.is_empty());
-        assert!(!in_think);
-        assert!(needs_continuation);
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].1, "read");
-        assert_eq!(parts.len(), 2);
-        assert_eq!(part_text(&parts[0]), Some("I will read it.\n"));
-        match &parts[1] {
-            ContentPart::ToolCall { name, input, .. } => {
-                assert_eq!(name, "read");
-                assert_eq!(input["path"], "src/lib.rs");
-            }
-            other => panic!("expected tool call part, got {other:?}"),
-        }
+        assert!(parts.iter().any(|p| part_is_text(p) && part_text(p).unwrap().contains("<read>")));
     }
 
     #[test]
-    fn process_aggregated_text_does_not_parse_tools_inside_think() {
-        let mut parts: Vec<ContentPart> = Vec::new();
-        let mut buf =
-            "<think>\n<read>\n<path>src/lib.rs</path>\n</read>\n</think>answer".to_string();
-        let mut in_think = false;
-        let mut known_tools = std::collections::HashSet::new();
-        known_tools.insert("read".to_string());
-        let mut id_counter = 0;
-        let mut pending = Vec::new();
-        let mut needs_continuation = false;
-
-        process_accumulated_text(
-            &mut buf,
-            &mut parts,
-            &mut in_think,
-            &known_tools,
-            &mut id_counter,
-            &mut pending,
-            &mut needs_continuation,
+    fn flush_text_buffer_tools_inside_think_become_reasoning() {
+        // The text-fallback path doesn't try to distinguish
+        // "tool call inside a think block" from "literal text
+        // inside a think block" — both are captured as Reasoning
+        // for the transcript. That's a fine fallback for models
+        // that emit think blocks as raw text. The primary
+        // structured path doesn't go through this buffer.
+        let parts = flush_for_test(
+            "<think>\n<read>\n<path>src/lib.rs</path>\n</read>\n</think>answer",
         );
-
-        assert!(pending.is_empty());
-        assert!(!needs_continuation);
         assert_eq!(parts.len(), 2);
         assert!(part_is_reasoning(&parts[0]));
+        assert!(part_text(&parts[0]).unwrap().contains("<read>"));
         assert_eq!(part_text(&parts[1]), Some("answer"));
-    }
-
-    // Regression: the model on a follow-up turn can emit a stray
-    // `</think>` from its previous turn's reasoning, then open a new
-    // `<think>` block. The runner must produce ONE reasoning part for
-    // the new thinking content, and put the orphan closer in the
-    // preceding text part. It must NOT duplicate the thinking text.
-    #[test]
-    fn process_aggregated_text_does_not_duplicate_thinking_across_orphan_close_then_open() {
-        let mut parts: Vec<ContentPart> = Vec::new();
-        let mut buf = "\n</think>\n\n<think>The user is asking me to try tool calls. \
-                       Let me try using some of the available tools to see if they work, \
-                       even though the LLM itself seems to have authentication issues.\n\n\
-                       Let me try a simple read or glob operation to see if the tool \
-                       infrastructure is working.\n</think>\n\n\n\nLet me try some tools:\n\n\
-                       Tool: glob\n[\"*\"]\n\nTool: read\n[\"/README.md\"]\n\n\
-                       Tool: websearch\n[\"test search\"]"
-            .to_string();
-        let mut in_think = false;
-        let mut known_tools = std::collections::HashSet::new();
-        known_tools.insert("glob".to_string());
-        known_tools.insert("read".to_string());
-        known_tools.insert("websearch".to_string());
-        let mut id_counter = 0;
-        let mut pending = Vec::new();
-        let mut needs_continuation = false;
-
-        process_accumulated_text(
-            &mut buf,
-            &mut parts,
-            &mut in_think,
-            &known_tools,
-            &mut id_counter,
-            &mut pending,
-            &mut needs_continuation,
-        );
-
-        let reasoning_count = parts.iter().filter(|p| part_is_reasoning(p)).count();
-        let reasoning_text: String = parts
-            .iter()
-            .filter_map(|p| match p {
-                ContentPart::Reasoning { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("");
-
-        assert_eq!(
-            reasoning_count, 1,
-            "expected exactly one reasoning part, got: {parts:#?}"
-        );
-        assert!(
-            reasoning_text.contains("user is asking me to try tool calls"),
-            "reasoning should capture the think block, got: {reasoning_text:?}"
-        );
-        assert!(
-            !reasoning_text.contains("Let me try some tools"),
-            "post-think text must not leak into reasoning, got: {reasoning_text:?}"
-        );
-    }
-        eprintln!("=== REASONING TEXT ===");
-        eprintln!("{reasoning_text:?}");
-
-        assert_eq!(
-            reasoning_count, 1,
-            "expected exactly one reasoning part, got: {parts:#?}"
-        );
-        assert!(
-            reasoning_text.contains("user is asking me to try tool calls"),
-            "reasoning should capture the think block, got: {reasoning_text:?}"
-        );
-        assert!(
-            !reasoning_text.contains("Let me try some tools"),
-            "post-think text must not leak into reasoning, got: {reasoning_text:?}"
-        );
     }
 
     // ---------- has_unfulfilled_tool_cases ----------
@@ -1738,13 +1450,45 @@ mod tests {
             .to_string()
     }
 
-    /// Same as `user_logged_buffer` but the model emits a `glob`
-    /// call instead of `read`. The runner's tool set knows about
-    /// `glob` and should parse + dispatch it.
-    fn user_logged_buffer_with_glob() -> String {
-        "\n</think>\n\n<think>Trying a glob.\n</think>\n\n\
-         <glob>\n<path>/tmp</path>\n<pattern>*</pattern>\n</glob>"
-            .to_string()
+    /// Scripted LLM that emits a structured `LlmEvent::ToolCall` for
+    /// `glob`, matching the opencode-style flow. The first script
+    /// emits a reasoning block + text + the structured tool call;
+    /// the second emits a `Finish` to close the loop.
+    fn run_with_structured_tool_call(
+        _session_directory: &str,
+        tool_call: LlmEvent,
+    ) -> Vec<Vec<LlmEvent>> {
+        // First turn: emit a brief reasoning preamble (live), a
+        // visible-text preamble, the structured tool call, and a
+        // Finish.
+        let turn1 = vec![
+            LlmEvent::ReasoningDelta {
+                id: "reasoning-0".to_string(),
+                text: "Let me find the marker file.".to_string(),
+            },
+            LlmEvent::TextDelta {
+                id: "text-0".to_string(),
+                text: "I will use glob to look for the marker.\n".to_string(),
+            },
+            tool_call,
+            LlmEvent::Finish {
+                reason: FinishReason::ToolCalls,
+                usage: None,
+            },
+        ];
+        // Second turn (after the tool result is in): a brief reply
+        // and a Stop.
+        let turn2 = vec![
+            LlmEvent::TextDelta {
+                id: "text-0".to_string(),
+                text: "Found the marker.".to_string(),
+            },
+            LlmEvent::Finish {
+                reason: FinishReason::Stop,
+                usage: None,
+            },
+        ];
+        vec![turn1, turn2]
     }
 
     fn text_delta_chunks(full: &str, chunk_size: usize) -> Vec<LlmEvent> {
@@ -1819,14 +1563,20 @@ mod tests {
     #[tokio::test]
     async fn e2e_stream_accumulates_text_and_extracts_single_reasoning_part() {
         init_tracing();
-        // The model streams a `` block + visible text + two valid
-        // XML tool calls. The runner should:
-        //   1. Accumulate the raw text into `accumulated_text`.
-        //   2. At the post-stream flush, call `process_accumulated_text`
-        //      exactly once on the whole buffer.
-        //   3. Produce ONE `Reasoning` part (not two).
-        //   4. Produce TWO `ToolCall` parts.
-        //   5. NOT have the think text anywhere in the visible text.
+        // The model streams a text buffer that contains a
+        // `<think>…</think>` block followed by visible text (and,
+        // historically, XML tool calls). After the opencode-style
+        // refactor, tool calls must arrive as structured
+        // `LlmEvent::ToolCall` events — the runner does NOT
+        // extract them from text any more. The XML in this
+        // historical buffer is preserved as visible text.
+        //
+        // The runner should:
+        //   1. Produce ONE `Reasoning` part (not two) from the
+        //      `<think>…</think>` block.
+        //   2. Produce ZERO `ToolCall` parts (the XML is text).
+        //   3. NOT have the think text anywhere in the visible
+        //      Text part.
         let full = user_logged_buffer();
         let chunks = text_delta_chunks(&full, 6);
         let (runner, _tmp, session_id) = run_with_scripted(
@@ -1844,10 +1594,6 @@ mod tests {
             .get_messages(&session_id)
             .expect("get_messages");
 
-        // The runner creates one assistant message per turn. The LAST
-        // one is from the final (no-op) turn with no script events,
-        // so its content is the empty `[]` snapshot. We want the
-        // previous turn that actually streamed the LLM output.
         let assistant = msgs
             .iter()
             .rev()
@@ -1879,6 +1625,7 @@ mod tests {
             "reasoning should capture the think block, got: {reasoning_text:?}"
         );
 
+        // Tool calls must NOT be parsed from text any more.
         let tool_calls: Vec<(String, String)> = parts
             .iter()
             .filter_map(|p| match p {
@@ -1886,15 +1633,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            tool_calls.len(),
-            2,
-            "expected two tool calls, got: {tool_calls:?}"
+        assert!(
+            tool_calls.is_empty(),
+            "xml tool calls in text must NOT be parsed as ToolCall, got: {tool_calls:?}"
         );
-        let tool_names: std::collections::HashSet<_> =
-            tool_calls.iter().map(|(_, n)| n.clone()).collect();
-        assert!(tool_names.contains("read"));
-        assert!(tool_names.contains("shell"));
 
         let text_visible: String = parts
             .iter()
@@ -1908,14 +1650,22 @@ mod tests {
             !text_visible.contains("The user is asking me to try tool calls"),
             "the think text must NOT leak into the visible Text part, got: {text_visible:?}"
         );
+        // The XML tool calls (which used to become ToolCall
+        // parts) now remain as visible text. This is a deliberate
+        // behavior change of the opencode-style refactor.
+        assert!(
+            text_visible.contains("<read>") && text_visible.contains("<shell>"),
+            "xml tool calls should remain as visible text, got: {text_visible:?}"
+        );
     }
 
     #[tokio::test]
     async fn e2e_stream_does_not_duplicate_reasoning_across_multiple_text_ends() {
         init_tracing();
         // Hypothetical provider that interleaves multiple
-        // TextStart/TextEnd cycles around a single think block. The
-        // runner must still produce exactly one Reasoning part.
+        // TextStart/TextEnd cycles around a single think block.
+        // The runner must still produce exactly one Reasoning
+        // part per `<think>…</think>` block.
         let full = user_logged_buffer();
         let mid = full.len() / 2;
         let (a, b) = full.split_at(mid);
@@ -1970,57 +1720,24 @@ mod tests {
             "two text-ends must not produce two reasoning parts, got: {:#?}",
             parts
         );
-        // The runner creates one assistant message per turn. The LAST
-        // one is from the final (no-op) turn with no script events,
-        // so its content is the empty `[]` snapshot. We want the
-        // previous turn that actually streamed the LLM output.
-        let assistant = msgs
-            .iter()
-            .rev()
-            .filter(|m| m.role == "assistant")
-            .find(|m| !m.content.is_empty() && m.content != "[]")
-            .expect("an assistant message with non-empty content");
-        tracing::info!(test = "e2e_stream_accumulates", persisted = %assistant.content, "persisted assistant content");
-
-        let parts: Vec<ContentPart> = serde_json::from_str(&assistant.content)
-            .expect("assistant content should be a parts JSON array");
-
-        let reasoning: Vec<String> = parts
-            .iter()
-            .filter_map(|p| match p {
-                ContentPart::Reasoning { text } => Some(text.clone()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            reasoning.len(),
-            1,
-            "expected exactly ONE reasoning part, got {}: {:#?}",
-            reasoning.len(),
-            parts
-        );
         let reasoning_text = &reasoning[0];
         assert!(
             reasoning_text.contains("The user is asking me to try tool calls"),
             "reasoning should capture the think block, got: {reasoning_text:?}"
         );
-
-        let tool_calls: Vec<(String, String)> = parts
+        // The XML tool calls are preserved as visible text.
+        let text_visible: String = parts
             .iter()
             .filter_map(|p| match p {
-                ContentPart::ToolCall { id, name, .. } => Some((id.clone(), name.clone())),
+                ContentPart::Text { text } => Some(text.clone()),
                 _ => None,
             })
-            .collect();
-        assert_eq!(
-            tool_calls.len(),
-            2,
-            "expected two tool calls, got: {tool_calls:?}"
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text_visible.contains("<read>") && text_visible.contains("<shell>"),
+            "xml tool calls should remain as visible text, got: {text_visible:?}"
         );
-        let tool_names: std::collections::HashSet<_> =
-            tool_calls.iter().map(|(_, n)| n.clone()).collect();
-        assert!(tool_names.contains("read"));
-        assert!(tool_names.contains("shell"));
 
         let text_visible: String = parts
             .iter()
@@ -2036,21 +1753,186 @@ mod tests {
         );
     }
 
+    /// Regression test for the bug where `glob` ignored the
+    /// session's project directory and fell back to the process
+    /// CWD. Now exercised via the **structured** `LlmEvent::ToolCall`
+    /// path (matching opencode): the provider emits a structured
+    /// tool call with an explicit `path` (or empty path), the
+    /// runner dispatches it with a `ToolContext` whose
+    /// `project_root` comes from `session.directory`, and `glob`
+    /// walks that directory.
+    ///
+    /// Flow under test (the *real* production path, end-to-end):
+    ///   1. `SessionService::create_session` inserts an
+    ///      `AgentSession` whose `directory` points at a unique
+    ///      `TempDir` (so it is guaranteed not to be the process
+    ///      CWD and not to contain `should-never-match-*` files).
+    ///   2. The scripted LLM emits a structured
+    ///      `LlmEvent::ToolCall` for `glob` with NO `path` field.
+    ///      The provider lowerer surfaces the call's input as
+    ///      `Value::Null` for the missing field; in production,
+    ///      `glob` falls back to the `ToolContext.project_root`.
+    ///   3. The runner builds a `ToolContext` from
+    ///      `session.directory` and dispatches through
+    ///      `run_tool_with_context`.
+    ///   4. `glob::run_with_context` walks the session root and
+    ///      finds the marker.
     #[tokio::test]
-    async fn e2e_glob_uses_session_project_root() {
+    async fn e2e_glob_uses_session_directory_via_structured_event() {
         init_tracing();
-        // Set up a fresh temp directory as the session's project
-        // root. The model's `glob` call passes `path="/tmp"` so the
-        // runner must use the explicit path, NOT the project root.
+
+        // (1) Build a session rooted at a unique TempDir. Plant two
+        //     files: one our pattern should match, one it must not
+        //     (sanity check that glob isn't just "*"ing everything).
         let session_root = TempDir::new().expect("tempdir");
         let session_root_path = session_root.path().to_path_buf();
-        // Plant a known file so the glob can find it.
-        let marker = session_root_path.join("marker-arachne-glob.txt");
+        let marker_name = "marker-arachne-glob-sessiondir.txt";
+        let marker = session_root_path.join(marker_name);
         std::fs::write(&marker, "found it").expect("write marker");
+        let decoy = session_root_path.join("should-never-match-decoy.bin");
+        std::fs::write(&decoy, vec![0u8; 4]).expect("write decoy");
 
-        let full = user_logged_buffer_with_glob();
-        let chunks = text_delta_chunks(&full, 6);
         let session_root_str = session_root_path.to_str().unwrap().to_string();
+        tracing::info!(
+            test = "e2e_glob_uses_session_directory_via_structured_event",
+            session_root = %session_root_str,
+            marker = %marker.display(),
+            process_cwd = %std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "<unknown>".to_string()),
+            "test setup: session dir is a unique TempDir, distinct from process CWD"
+        );
+
+        // (2) The scripted LLM emits a structured `glob` tool call
+        //     with no `path` field. Production glob defaults the
+        //     search root to the `ToolContext.project_root`, which
+        //     is the session's directory.
+        let tool_call = LlmEvent::ToolCall {
+            id: "call_glob_1".to_string(),
+            name: "glob".to_string(),
+            input: serde_json::json!({ "pattern": "marker-arachne-glob-*.txt" }),
+            provider_executed: Some(false),
+        };
+        let scripts = run_with_structured_tool_call(&session_root_str, tool_call);
+
+        let (runner, _tmp, session_id) = run_with_scripted(
+            "scripted",
+            scripts,
+            &session_root_str,
+        )
+        .await;
+
+        // (3)+(4) End-to-end: the runner loads the session, builds
+        //         the ToolContext from session.directory, and
+        //         dispatches the glob.
+        let result = runner.run(&session_id).await;
+        assert!(result.is_ok(), "run failed: {:?}", result.err());
+
+        // Pull the assistant message that contains the tool call.
+        // There may be multiple assistant messages in the
+        // conversation (one per turn); find the one that has a
+        // `ToolCall` part.
+        let msgs = runner
+            .conversation_service
+            .get_messages(&session_id)
+            .expect("get_messages");
+        let assistant_with_call = msgs
+            .iter()
+            .rev()
+            .filter(|m| m.role == "assistant")
+            .find(|m| {
+                !m.content.is_empty()
+                    && m.content != "[]"
+                    && serde_json::from_str::<Vec<ContentPart>>(&m.content)
+                        .map(|parts| {
+                            parts.iter().any(|p| matches!(p, ContentPart::ToolCall { .. }))
+                        })
+                        .unwrap_or(false)
+            })
+            .expect("non-empty assistant message containing a ToolCall");
+        let parts: Vec<ContentPart> =
+            serde_json::from_str(&assistant_with_call.content).expect("parts");
+
+        // The structured tool call should produce a `ToolCall`
+        // part *and* a `ToolResult` part with the glob output.
+        let tool_calls: Vec<&ContentPart> = parts
+            .iter()
+            .filter(|p| matches!(p, ContentPart::ToolCall { .. }))
+            .collect();
+        assert_eq!(
+            tool_calls.len(),
+            1,
+            "expected exactly one ToolCall, got: {parts:#?}"
+        );
+        let results: Vec<&ContentPart> = parts
+            .iter()
+            .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
+            .collect();
+        assert_eq!(
+            results.len(),
+            1,
+            "expected exactly one ToolResult (the glob), got: {parts:#?}"
+        );
+        let result_text = match &results[0] {
+            ContentPart::ToolResult { result, .. } => result.to_string(),
+            _ => unreachable!(),
+        };
+        tracing::info!(
+            test = "e2e_glob_uses_session_directory_via_structured_event",
+            glob_result = %result_text,
+            "glob tool_result"
+        );
+
+        // --- The actual assertions ---
+        // 1. glob MUST NOT fail with "No files found" — that
+        //    indicates it walked the wrong directory.
+        assert!(
+            !result_text.contains("No files found"),
+            "glob searched the wrong directory; got: {result_text}"
+        );
+        // 2. The marker file path (under the session root) MUST
+        //    appear in the result.
+        assert!(
+            result_text.contains(marker_name),
+            "glob did NOT find the marker under the session dir \
+             ({session_root_str}); the runner is not threading \
+             session.directory into glob's project_root. got: \
+             {result_text}"
+        );
+        // 3. The decoy file MUST NOT match the pattern.
+        assert!(
+            !result_text.contains("should-never-match-decoy.bin"),
+            "glob returned an unrelated file; pattern filtering \
+             is broken. got: {result_text}"
+        );
+
+        // 4. The Reasoning part from the structured `ReasoningDelta`
+        //    should be persisted.
+        assert!(
+            parts
+                .iter()
+                .any(|p| matches!(p, ContentPart::Reasoning { text } if text.contains("Let me find"))),
+            "structured ReasoningDelta should produce a Reasoning part, got: {parts:#?}"
+        );
+    }
+
+    /// Regression test for the opencode-style refactor: an LLM that
+    /// emits an XML-style tool call embedded in its text stream
+    /// (the OLD format) is now treated as plain text. The runner
+    /// does NOT extract tool calls from text — it relies on
+    /// structured events from the provider.
+    #[tokio::test]
+    async fn e2e_xml_text_tool_call_is_not_extracted() {
+        init_tracing();
+        let session_root = TempDir::new().expect("tempdir");
+        let session_root_path = session_root.path().to_path_buf();
+        let session_root_str = session_root_path.to_str().unwrap().to_string();
+
+        // The scripted "LLM" emits a text block that contains the
+        // OLD XML tool format. The runner must treat the entire
+        // thing as visible text and NOT produce a `ContentPart::ToolCall`.
+        let model_text = "<read>\n<path>/etc/hostname</path>\n</read>".to_string();
+        let chunks = text_delta_chunks(&model_text, 6);
         let (runner, _tmp, session_id) = run_with_scripted(
             "scripted",
             vec![
@@ -2074,30 +1956,28 @@ mod tests {
             .filter(|m| m.role == "assistant")
             .find(|m| !m.content.is_empty() && m.content != "[]")
             .expect("non-empty assistant message");
-        let parts: Vec<ContentPart> =
-            serde_json::from_str(&assistant.content).expect("parts");
+        let parts: Vec<ContentPart> = serde_json::from_str(&assistant.content).expect("parts");
 
-        // The glob call should have produced a tool_result part.
-        let results: Vec<&ContentPart> = parts
-            .iter()
-            .filter(|p| matches!(p, ContentPart::ToolResult { .. }))
-            .collect();
-        assert_eq!(
-            results.len(),
-            1,
-            "expected one tool_result (the glob), got: {parts:#?}"
-        );
-        let result_text = match &results[0] {
-            ContentPart::ToolResult { result, .. } => result.to_string(),
-            _ => unreachable!(),
-        };
-        // The glob matched against /tmp. Even on a minimal CI image
-        // /tmp has at least a handful of files, so the result string
-        // should be non-empty.
-        tracing::info!(test = "e2e_glob_uses_session_project_root", glob_result = %result_text, "glob tool_result");
         assert!(
-            !result_text.contains("error"),
-            "glob returned an error: {result_text}"
+            !parts.iter().any(|p| matches!(p, ContentPart::ToolCall { .. })),
+            "xml-style tool call in text must NOT be parsed as a ToolCall, got: {parts:#?}"
+        );
+        assert!(
+            !parts.iter().any(|p| matches!(p, ContentPart::ToolResult { .. })),
+            "no tool result should be produced when no tool was called, got: {parts:#?}"
+        );
+        // The XML is preserved as visible text.
+        let combined_text: String = parts
+            .iter()
+            .filter_map(|p| match p {
+                ContentPart::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            combined_text.contains("<read>"),
+            "xml text must remain visible to the user, got: {combined_text:?}"
         );
     }
 

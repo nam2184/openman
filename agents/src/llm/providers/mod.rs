@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::Stream;
 
-use super::events::{FinishReason, LlmEvent, Usage};
+use super::events::LlmEvent;
 use super::request::{LlmError, LlmMessage, LlmRequest, LlmResponse};
 
 pub mod anthropic;
@@ -77,192 +77,12 @@ pub struct ToolResultInject {
     pub result: Value,
 }
 
+/// Helper used by provider implementations to extract the JSON
+/// payload from an SSE `data: ...` line. Returns `None` if the
+/// line is not a `data:` line.
 pub fn parse_sse_line(line: &str) -> Option<String> {
-    if line.starts_with("data: ") {
-        Some(line[7..].to_string())
-    } else {
-        None
-    }
-}
-
-pub fn parse_openai_chunk(text: &str) -> Option<LlmEvent> {
-    let json: Value = serde_json::from_str(text).ok()?;
-    let choices = json.get("choices")?.as_array()?;
-    let choice = choices.first()?;
-    let delta = choice.get("delta")?;
-
-    let reasoning = delta
-        .get("reasoning_content")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| {
-            delta
-                .get("reasoning_details")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|d| d.get("text"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        });
-
-    if let Some(reason) = reasoning {
-        if !reason.is_empty() {
-            return Some(LlmEvent::ReasoningDelta {
-                id: "reasoning".to_string(),
-                text: reason,
-            });
-        }
-    }
-
-    if let Some(text) = delta.get("content").and_then(|v| v.as_str()) {
-        if !text.is_empty() {
-            return Some(LlmEvent::TextDelta {
-                id: "text".to_string(),
-                text: text.to_string(),
-            });
-        }
-    }
-
-    if let Some(reason) = choice.get("finish_reason").and_then(|v| v.as_str()) {
-        let usage = json.get("usage").and_then(|u| parse_openai_usage(u));
-        return Some(LlmEvent::Finish {
-            reason: FinishReason::from(reason),
-            usage,
-        });
-    }
-
-    None
-}
-
-pub fn parse_openai_tool_call(delta: &Value) -> Option<LlmEvent> {
-    let tool_calls = delta.get("tool_calls")?.as_array()?;
-    let call = tool_calls.first()?;
-    let id = call.get("id")?.as_str()?.to_string();
-    let function = call.get("function")?;
-    let name = function.get("name")?.as_str()?.to_string();
-    let args = function
-        .get("arguments")
-        .and_then(|a| a.as_str())
-        .unwrap_or("{}");
-    let input: Value = serde_json::from_str(args).unwrap_or(Value::Null);
-
-    Some(LlmEvent::ToolCall {
-        id,
-        name,
-        input,
-        provider_executed: Some(false),
-    })
-}
-
-fn parse_openai_usage(value: &Value) -> Option<Usage> {
-    Some(Usage {
-        input_tokens: value.get("prompt_tokens").and_then(|v| v.as_u64()),
-        output_tokens: value.get("completion_tokens").and_then(|v| v.as_u64()),
-        total_tokens: value.get("total_tokens").and_then(|v| v.as_u64()),
-        reasoning_tokens: None,
-        cache_read_input_tokens: None,
-        cache_write_input_tokens: None,
-    })
-}
-
-pub fn parse_anthropic_event(line: &str) -> Option<LlmEvent> {
-    let data = parse_sse_line(line)?;
-    let event_type = data
-        .lines()
-        .next()
-        .and_then(|l| l.strip_prefix("event: "))?;
-    let content = data
-        .lines()
-        .find(|l| l.starts_with("data: "))
-        .map(|l| &l[7..])?;
-
-    match event_type.trim() {
-        "message_start" => Some(LlmEvent::StepStart { index: 0 }),
-        "content_block_start" => {
-            let json: Value = serde_json::from_str(content).ok()?;
-            let block_type = json.get("type")?.as_str()?;
-            if block_type == "text" {
-                Some(LlmEvent::TextStart {
-                    id: "text".to_string(),
-                })
-            } else if block_type == "thinking" {
-                Some(LlmEvent::ReasoningStart {
-                    id: "reasoning".to_string(),
-                })
-            } else {
-                None
-            }
-        }
-        "content_block_delta" => {
-            let json: Value = serde_json::from_str(content).ok()?;
-            let delta_type = json.get("type")?.as_str()?;
-            if delta_type == "text_delta" {
-                let text = json.get("text")?.as_str()?.to_string();
-                if !text.is_empty() {
-                    return Some(LlmEvent::TextDelta {
-                        id: "text".to_string(),
-                        text,
-                    });
-                }
-            } else if delta_type == "thinking_delta" {
-                let text = json
-                    .get("thinking")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if !text.is_empty() {
-                    return Some(LlmEvent::ReasoningDelta {
-                        id: "reasoning".to_string(),
-                        text,
-                    });
-                }
-            }
-            None
-        }
-        "content_block_stop" => {
-            let json: Value = serde_json::from_str(content).ok()?;
-            let index = json.get("index")?.as_u64()? as u32;
-            Some(LlmEvent::TextEnd {
-                id: format!("block-{index}"),
-            })
-        }
-        "message_delta" => {
-            let json: Value = serde_json::from_str(content).ok()?;
-            let delta = json.get("delta")?;
-            let stop_sequence = delta.get("stop_sequence")?.as_null();
-            let usage = json.get("usage").and_then(|u| parse_anthropic_usage(u));
-
-            if stop_sequence.is_some() {
-                Some(LlmEvent::Finish {
-                    reason: FinishReason::Stop,
-                    usage,
-                })
-            } else {
-                None
-            }
-        }
-        "message_stop" => Some(LlmEvent::Finish {
-            reason: FinishReason::Stop,
-            usage: None,
-        }),
-        "input_json" => None,
-        _ => None,
-    }
-}
-
-fn parse_anthropic_usage(value: &Value) -> Option<Usage> {
-    Some(Usage {
-        input_tokens: value.get("input_tokens").and_then(|v| v.as_u64()),
-        output_tokens: value.get("output_tokens").and_then(|v| v.as_u64()),
-        total_tokens: value.get("total_tokens").and_then(|v| v.as_u64()),
-        reasoning_tokens: value.get("thinking_tokens").and_then(|v| v.as_u64()),
-        cache_read_input_tokens: value
-            .get("cache_read_input_tokens")
-            .and_then(|v| v.as_u64()),
-        cache_write_input_tokens: value
-            .get("cache_creation_input_tokens")
-            .and_then(|v| v.as_u64()),
-    })
+    const PREFIX: &str = "data: ";
+    line.strip_prefix(PREFIX).map(|s| s.to_string())
 }
 
 pub fn to_llm_messages(history: &[(String, String)]) -> Vec<LlmMessage> {

@@ -116,10 +116,13 @@ pub struct LlmRequest {
     pub provider: String,
     pub system: Vec<String>,
     pub messages: Vec<LlmMessage>,
-    /// Kept for backward compatibility; providers no longer serialize
-    /// tools into the request body. The runner renders tool
-    /// definitions into the system prompt (XML format) and parses
-    /// tool calls out of the streamed text.
+    /// Tool definitions advertised to the model via the request body.
+    /// Each provider lowers this list into its native wire format
+    /// (`tools: [...]` for OpenAI-Chat / Anthropic-Messages, etc.).
+    /// The model is expected to return tool calls as structured
+    /// events (`delta.tool_calls` for OpenAI-Chat, `tool_use` content
+    /// blocks for Anthropic), which the providers translate into
+    /// `LlmEvent::ToolInput*` / `LlmEvent::ToolCall` events.
     pub tools: Vec<ToolDefinition>,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
@@ -159,8 +162,8 @@ impl LlmRequest {
 
     /// No-op. Tools are no longer advertised through the request body;
     /// the runner injects them into the system prompt instead. Kept so
-    /// external callers don't need to be updated; new code should call
-    /// `xml_tools::render_tools_as_prompt` directly.
+    /// external callers don't need to be updated; new code should pass
+    /// `tools` via the provider's request builder.
     pub fn with_tools(mut self, tools: impl IntoIterator<Item = ToolDefinition>) -> Self {
         self.tools.extend(tools);
         self
